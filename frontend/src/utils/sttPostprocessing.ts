@@ -309,13 +309,47 @@ function applyContextCorrections(text: string): string {
 }
 
 /**
+ * [advice from AI] 반복 패턴 제거
+ * "국기에 대하여 정책 국기에 대하여 경례" → "국기에 대하여 경례"
+ * WhisperLiveKit이 중간 인식 수정하면서 발생하는 반복 제거
+ */
+export function removeRepetitions(text: string): string {
+  if (!text || text.length < 10) return text;
+  
+  // 5자 이상의 반복 패턴 찾기
+  const minPatternLength = 5;
+  let result = text;
+  
+  for (let len = minPatternLength; len <= Math.floor(text.length / 2); len++) {
+    for (let i = 0; i <= text.length - len * 2; i++) {
+      const pattern = text.substring(i, i + len);
+      const restOfText = text.substring(i + len);
+      
+      // 패턴이 뒤에서 다시 나타나면
+      const repeatIndex = restOfText.indexOf(pattern);
+      if (repeatIndex !== -1 && repeatIndex < len + 5) {
+        // 두 번째 패턴부터 끝까지 유지 (수정된 인식일 가능성 높음)
+        result = text.substring(0, i) + restOfText.substring(repeatIndex);
+        console.log(`[후처리] 반복제거: "${pattern}" 반복 발견 → "${result.substring(0, 40)}..."`);
+        return removeRepetitions(result); // 재귀적으로 다시 검사
+      }
+    }
+  }
+  
+  return result;
+}
+
+/**
  * 정부 용어 사전 매칭
  */
 export function applyGovernmentTerms(text: string): string {
   if (!text) return text;
   
-  // [advice from AI] 문맥 기반 수정 먼저 적용
-  let result = applyContextCorrections(text);
+  // [advice from AI] 반복 패턴 제거 먼저
+  let result = removeRepetitions(text);
+  
+  // [advice from AI] 문맥 기반 수정
+  result = applyContextCorrections(result);
   
   for (const [wrong, correct] of Object.entries(cachedGovernmentTerms)) {
     if (wrong && result.includes(wrong)) {

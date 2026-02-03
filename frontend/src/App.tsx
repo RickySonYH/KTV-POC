@@ -1,6 +1,6 @@
 // [advice from AI] KTV 실시간 AI 자동자막 - 라이브 실시간 STT 연동
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import Header from './components/Header';
 import FileUpload from './components/FileUpload';
 import VideoPlayer, { type VideoPlayerRef } from './components/VideoPlayer';
@@ -1226,9 +1226,14 @@ function App() {
     };
   }, []);
 
-  // [advice from AI] SRT/VTT 생성 (표시된 자막만)
+  // [advice from AI] ★ 시간순 정렬된 자막 목록
+  const sortedSubtitles = useMemo(() => {
+    return [...displayedSubtitles].sort((a, b) => a.startTime - b.startTime);
+  }, [displayedSubtitles]);
+
+  // [advice from AI] SRT/VTT 생성 (시간순 정렬된 자막)
   const generateSrtContent = useCallback(() => {
-    return displayedSubtitles.map((sub, i) => {
+    return sortedSubtitles.map((sub, i) => {
       const formatTime = (s: number) => {
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
@@ -1239,7 +1244,7 @@ function App() {
       const speaker = sub.speaker ? `[${sub.speaker}] ` : '';
       return `${i + 1}\n${formatTime(sub.startTime)} --> ${formatTime(sub.endTime)}\n${speaker}${sub.text}\n`;
     }).join('\n');
-  }, [displayedSubtitles]);
+  }, [sortedSubtitles]);
 
   const generateVttContent = useCallback(() => {
     const formatTime = (s: number) => {
@@ -1249,7 +1254,7 @@ function App() {
       const ms = Math.floor((s % 1) * 1000);
       return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
     };
-    const body = displayedSubtitles.map((sub, i) => {
+    const body = sortedSubtitles.map((sub, i) => {
       const speaker = sub.speaker ? `<v ${sub.speaker}>` : '';
       return `${i + 1}\n${formatTime(sub.startTime)} --> ${formatTime(sub.endTime)}\n${speaker}${sub.text}\n`;
     }).join('\n');
@@ -1788,7 +1793,8 @@ function App() {
                     flexDirection: 'column',
                     gap: '8px'
                   }}>
-                    {displayedSubtitles.map((sub) => {
+                    {/* [advice from AI] ★ 시간순 정렬된 자막 목록 */}
+                    {sortedSubtitles.map((sub) => {
                       const isEditing = editingSubtitleId === sub.id;
                       
                       return (
