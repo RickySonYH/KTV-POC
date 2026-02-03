@@ -130,6 +130,37 @@ function App() {
     return (common / shorter.length) >= threshold;
   }, []);
   
+  // [advice from AI] ★ 최근 추가된 텍스트와 비교 (강화된 중복 방지)
+  const isRecentlyAdded = useCallback((text: string): boolean => {
+    if (!text) return false;
+    const trimmed = text.trim();
+    
+    // 정확히 같은 텍스트
+    if (recentAddedTextsRef.current.includes(trimmed)) return true;
+    
+    // 유사한 텍스트 (최근 5개와 비교)
+    for (const recent of recentAddedTextsRef.current) {
+      if (isSimilarText(trimmed, recent, 0.7)) {
+        console.log(`[중복체크] ⏭️ 유사 중복 발견: "${trimmed.substring(0, 20)}..." ≈ "${recent.substring(0, 20)}..."`);
+        return true;
+      }
+    }
+    return false;
+  }, [isSimilarText]);
+  
+  // [advice from AI] ★ 텍스트 추가 시 최근 목록에 기록 (최대 5개 유지)
+  const addToRecentTexts = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    
+    recentAddedTextsRef.current.push(trimmed);
+    // 최대 5개 유지
+    if (recentAddedTextsRef.current.length > 5) {
+      recentAddedTextsRef.current.shift();
+    }
+    lastAddedTextRef.current = trimmed;
+  }, []);
+  
   // [advice from AI] 현재 화면에 표시할 캡션
   const [currentSpeaker, setCurrentSpeaker] = useState<string | null>(null);
   const [latestSubtitleId, setLatestSubtitleId] = useState<number | null>(null);
@@ -265,6 +296,7 @@ function App() {
   // [advice from AI] 자막 처리를 위한 ref들
   const lastBufferTextRef = useRef<string>('');  // 중복 버퍼 방지
   const lastAddedTextRef = useRef<string>('');   // 마지막으로 목록에 추가된 텍스트 (중복 방지)
+  const recentAddedTextsRef = useRef<string[]>([]);  // [advice from AI] ★ 최근 추가된 텍스트 5개 (강화된 중복 방지)
   const sentenceStartTimeRef = useRef<number>(0); // 현재 문장 시작 시간
   const currentSentenceRef = useRef<string>('');  // 현재 문장 누적
   
@@ -456,14 +488,13 @@ function App() {
     const totalDuration = Math.max(subtitle.endTime - subtitle.startTime, 1);
     const durationPerSentence = totalDuration / processedSentences.length;
     
-    // Step 4: 자막 목록에 추가
+    // Step 4: 자막 목록에 추가 (강화된 중복 체크)
     const newSubtitles: SubtitleSegment[] = [];
     
     processedSentences.forEach(({ processed }, index) => {
-      // [advice from AI] ★ 정확히 같거나 유사한 텍스트 중복 방지
-      if (processed === lastAddedTextRef.current || 
-          isSimilarText(processed, lastAddedTextRef.current, 0.7)) {
-        console.log(`[SUBTITLE-LIST] ⏭️ 유사 중복 스킵: "${processed.substring(0, 30)}..."`);
+      // [advice from AI] ★ 최근 5개 텍스트와 비교 (강화된 중복 방지)
+      if (isRecentlyAdded(processed)) {
+        console.log(`[SUBTITLE-LIST] ⏭️ 중복 스킵: "${processed.substring(0, 30)}..."`);
         return;
       }
       
@@ -481,20 +512,19 @@ function App() {
       
       newSubtitles.push(newSubtitle);
       displayedIdsRef.current.add(segmentIdRef.current);
-      lastAddedTextRef.current = processed;  // 추가 시마다 업데이트
+      addToRecentTexts(processed);  // [advice from AI] ★ 최근 목록에 추가
     });
     
     // Step 5: 상태 업데이트
     if (newSubtitles.length > 0) {
       setDisplayedSubtitles(prev => [...prev, ...newSubtitles]);
       setLatestSubtitleId(segmentIdRef.current);
-      lastAddedTextRef.current = processedSentences[processedSentences.length - 1].processed;
       // [advice from AI] 자막 목록에 추가된 개수만 간단히 로그
       console.log(`[SUBTITLE-LIST] ✅ ${newSubtitles.length}개 추가됨`);
     }
     
     currentSentenceRef.current = '';
-  }, [updateDisplayLines]);
+  }, [updateDisplayLines, isRecentlyAdded, addToRecentTexts]);
 
   // [advice from AI] 실시간 버퍼 업데이트 (중간 결과) - 화면 표시
   // ★ 핵심: WhisperLiveKit buffer는 새 인식이 시작되면 리셋됨!
@@ -616,16 +646,15 @@ function App() {
         
         console.log(`[BUFFER-CONFIRM] ⏰ 버퍼 확정: ${rawSentences.length}개 문장 [${startTime.toFixed(1)}s~${endTime.toFixed(1)}s]`);
         
-        // 각 문장에 후처리 적용 + 유사도 체크
+        // 각 문장에 후처리 적용 + 강화된 중복 체크
         const processedSentences: string[] = [];
         for (const sentence of rawSentences) {
           const processed = postprocessText(sentence, true);
-          // [advice from AI] ★ 정확히 같거나 유사한 텍스트 중복 방지
-          if (processed && processed !== lastAddedTextRef.current && 
-              !isSimilarText(processed, lastAddedTextRef.current, 0.7)) {
+          // [advice from AI] ★ 최근 5개 텍스트와 비교 (강화된 중복 방지)
+          if (processed && !isRecentlyAdded(processed)) {
             processedSentences.push(processed);
           } else if (processed) {
-            console.log(`[BUFFER-CONFIRM] ⏭️ 유사 중복 스킵: "${processed.substring(0, 30)}..."`);
+            console.log(`[BUFFER-CONFIRM] ⏭️ 중복 스킵: "${processed.substring(0, 30)}..."`);
           }
         }
         
@@ -648,19 +677,19 @@ function App() {
               speaker: lastLiveSpeakerRef.current
             });
             displayedIdsRef.current.add(segmentIdRef.current);
+            addToRecentTexts(processed);  // [advice from AI] ★ 최근 목록에 추가
             console.log(`[BUFFER-CONFIRM] ✅ "${processed.substring(0, 30)}..." [${sentenceStart.toFixed(1)}s]`);
           });
           
           setDisplayedSubtitles(prev => [...prev, ...newSubtitles]);
           setLatestSubtitleId(segmentIdRef.current);
-          lastAddedTextRef.current = processedSentences[processedSentences.length - 1];
         }
       }
       // 버퍼 리셋
       lastBufferForListRef.current = '';
       bufferStartTimeRef.current = currentTimeRef.current;
     }, BUFFER_CONFIRM_TIMEOUT);
-  }, [updateDisplayLines, SUBTITLE_FADE_TIMEOUT, BUFFER_CONFIRM_TIMEOUT]);
+  }, [updateDisplayLines, SUBTITLE_FADE_TIMEOUT, BUFFER_CONFIRM_TIMEOUT, isRecentlyAdded, addToRecentTexts]);
 
   // [advice from AI] 비디오 오디오 직접 캡처 → WhisperLiveKit 실시간 STT
   const { 
@@ -691,6 +720,7 @@ function App() {
   const resetSubtitleRefs = useCallback(() => {
     lastBufferTextRef.current = '';
     lastAddedTextRef.current = '';
+    recentAddedTextsRef.current = [];  // [advice from AI] ★ 최근 텍스트 배열도 초기화
     sentenceStartTimeRef.current = 0;
     currentSentenceRef.current = '';
     displayTextRef.current = '';
