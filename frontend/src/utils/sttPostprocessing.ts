@@ -282,14 +282,43 @@ export function applyProperNouns(text: string): string {
 }
 
 /**
+ * [advice from AI] 문맥 기반 오인식 수정
+ * WhisperLiveKit이 "국민의례"를 "국민의힘"으로 잘못 인식하는 문제 해결
+ */
+const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; description: string }> = [
+  // "먼저 국민의힘" → "먼저 국민의례" (국무회의 시작 발언)
+  { pattern: /먼저\s*국민의힘/gi, replacement: '먼저 국민의례', description: '국민의례 오인식' },
+  // "국민의힘의 의견을 전해" → 환각으로 간주 (삭제)
+  { pattern: /국민의힘의\s*의견을?\s*전해드리겠습니다?/gi, replacement: '', description: '국민의례 환각' },
+  // "국민의힘을 하겠습니다" → "국민의례를 하겠습니다"
+  { pattern: /국민의힘을?\s*하겠습니다/gi, replacement: '국민의례를 하겠습니다', description: '국민의례 오인식' },
+];
+
+function applyContextCorrections(text: string): string {
+  if (!text) return text;
+  
+  let result = text;
+  for (const { pattern, replacement, description } of CONTEXT_CORRECTIONS) {
+    const before = result;
+    result = result.replace(pattern, replacement);
+    if (before !== result) {
+      console.log(`[후처리] 문맥수정 (${description}): "${before.substring(0, 30)}..." → "${result.substring(0, 30)}..."`);
+    }
+  }
+  return result.trim();
+}
+
+/**
  * 정부 용어 사전 매칭
  */
 export function applyGovernmentTerms(text: string): string {
   if (!text) return text;
   
-  let result = text;
+  // [advice from AI] 문맥 기반 수정 먼저 적용
+  let result = applyContextCorrections(text);
+  
   for (const [wrong, correct] of Object.entries(cachedGovernmentTerms)) {
-    if (wrong && text.includes(wrong)) {
+    if (wrong && result.includes(wrong)) {
       const pattern = new RegExp(wrong, 'gi');
       const before = result;
       result = result.replace(pattern, correct);
