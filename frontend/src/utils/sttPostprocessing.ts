@@ -314,10 +314,10 @@ function applyContextCorrections(text: string): string {
  * WhisperLiveKit이 중간 인식 수정하면서 발생하는 반복 제거
  */
 export function removeRepetitions(text: string): string {
-  if (!text || text.length < 10) return text;
+  if (!text || text.length < 15) return text;  // [advice from AI] 15자 미만은 반복 제거 안 함
   
-  // 5자 이상의 반복 패턴 찾기
-  const minPatternLength = 5;
+  // [advice from AI] 7자 이상의 반복 패턴만 찾기 (너무 짧으면 오탐)
+  const minPatternLength = 7;
   let result = text;
   
   for (let len = minPatternLength; len <= Math.floor(text.length / 2); len++) {
@@ -325,9 +325,9 @@ export function removeRepetitions(text: string): string {
       const pattern = text.substring(i, i + len);
       const restOfText = text.substring(i + len);
       
-      // 패턴이 뒤에서 다시 나타나면
+      // 패턴이 뒤에서 다시 나타나면 (간격이 5자 이내)
       const repeatIndex = restOfText.indexOf(pattern);
-      if (repeatIndex !== -1 && repeatIndex < len + 5) {
+      if (repeatIndex !== -1 && repeatIndex < 5) {
         // 두 번째 패턴부터 끝까지 유지 (수정된 인식일 가능성 높음)
         result = text.substring(0, i) + restOfText.substring(repeatIndex);
         console.log(`[후처리] 반복제거: "${pattern}" 반복 발견 → "${result.substring(0, 40)}..."`);
@@ -442,16 +442,10 @@ export function postprocessText(text: string, forSubtitleList: boolean = false):
   }
 
   // 2-2. 일반 할루시네이션 체크
-  if (forSubtitleList) {
-    // 자막 목록: 15자 이상이면 할루시네이션 체크 스킵 (더 관대하게)
-    if (result.length < 15 && isHallucination(result)) {
-      return '';
-    }
-  } else {
-    // 실시간 화면: 기존 로직 유지
-    if (isHallucination(result)) {
-      return '';
-    }
+  // [advice from AI] ★ 10자 이상이면 할루시네이션 체크 건너뜀 (정상적인 문장일 가능성 높음)
+  if (result.length < 10 && isHallucination(result)) {
+    console.log(`[POSTPROCESS] 🚫 할루시네이션 스킵: "${result}" (${result.length}자)`);
+    return '';
   }
 
   // 3. 비속어 필터

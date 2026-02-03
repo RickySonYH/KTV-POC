@@ -548,10 +548,13 @@ function App() {
     }
     
     // ★ 1. 할루시네이션 필터 - 새 버퍼 텍스트만 체크
-    const isHallucinationResult = isHallucination(rawText);
-    
-    if (isHallucinationResult) {
-      return;  // 화면에 표시하지 않음
+    // [advice from AI] 10자 이상이면 할루시네이션 체크 건너뜀
+    if (rawText.length < 10) {
+      const isHallucinationResult = isHallucination(rawText);
+      if (isHallucinationResult) {
+        console.log(`[BUFFER] 🚫 할루시네이션 스킵: "${rawText}" (${rawText.length}자)`);
+        return;  // 화면에 표시하지 않음
+      }
     }
     
     // [advice from AI] 실제 새 텍스트가 있을 때만 로그 출력
