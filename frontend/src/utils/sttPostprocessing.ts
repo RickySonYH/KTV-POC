@@ -286,16 +286,30 @@ export function applyProperNouns(text: string): string {
  * WhisperLiveKit이 "국민의례"를 "국민의힘"으로 잘못 인식하는 문제 해결
  */
 const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; description: string }> = [
+  // [advice from AI] ★ 국민의례 관련 오인식 수정 (우선순위 높음)
   // "먼저 국민의힘" → "먼저 국민의례" (국무회의 시작 발언)
   { pattern: /먼저\s*국민의힘/gi, replacement: '먼저 국민의례', description: '국민의례 오인식' },
   // "국민의힘의 의견을 전해" → 환각으로 간주 (삭제)
   { pattern: /국민의힘의\s*의견을?\s*전해드리겠습니다?/gi, replacement: '', description: '국민의례 환각' },
   // "국민의힘을 하겠습니다" → "국민의례를 하겠습니다"
   { pattern: /국민의힘을?\s*하겠습니다/gi, replacement: '국민의례를 하겠습니다', description: '국민의례 오인식' },
-  // [advice from AI] "국민을 국민의례를" → "국민의례를" (중복 수정)
+  // "국민을 국민의례를" → "국민의례를" (중복 수정)
   { pattern: /국민을\s*국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
   // "국민 국민의례를" → "국민의례를"
   { pattern: /국민\s+국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
+  
+  // [advice from AI] ★ 추가 오인식 패턴 (로그 분석 기반)
+  // "먼저 국민들에게 전해드리겠습니다" → "먼저 국민의례를 하겠습니다"
+  { pattern: /먼저\s*국민들에게\s*전해드리겠습니다/gi, replacement: '먼저 국민의례를 하겠습니다', description: '국민의례 오인식2' },
+  // "국민을 국민의뢰를" → "국민의례를" (의뢰 오인식)
+  { pattern: /국민을?\s*국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰 오인식' },
+  // "이는 성장과 이는 성장의" → "이는 성장의" (반복)
+  { pattern: /이는\s*성장과\s*이는\s*성장의/gi, replacement: '이는 성장의', description: '반복 제거' },
+  // "전반 전반으로" → "전반으로" (반복)
+  { pattern: /전반\s+전반으로/gi, replacement: '전반으로', description: '반복 제거' },
+  // "홀떼받은 홀떼받던" → "홀대받던" (오타 + 반복)
+  { pattern: /홀떼받은\s*홀떼받던/gi, replacement: '홀대받던', description: '오타 수정' },
+  { pattern: /홀떼받/gi, replacement: '홀대받', description: '오타 수정' },
 ];
 
 function applyContextCorrections(text: string): string {
@@ -411,10 +425,15 @@ const STRONG_HALLUCINATION_PATTERNS: RegExp[] = [
   /구독.*좋아요/i,     // "구독과 좋아요" 등
   /좋아요.*구독/i,
   /채널.*구독/i,
-  /다음\s*영상에서\s*만나/i,
+  /다음\s*영상에서\s*만나/i,  // "다음 영상에서 만나요"
+  /다음\s*영상에서\s*만나요/i,
   /thank\s*you\s*for\s*watching/i,
   /please\s*subscribe/i,
   /like\s*and\s*subscribe/i,
+  // [advice from AI] ★ 추가 할루시네이션 패턴 (로그 분석 기반)
+  /^감사합니다\.?$/i,   // 단독 "감사합니다"
+  /^많은$/i,            // 단독 "많은"
+  /^3회$/i,             // 단독 "3회" (국무회의 오인식)
 ];
 
 /**
@@ -460,6 +479,10 @@ export function postprocessText(text: string, forSubtitleList: boolean = false):
 
   // 5. 정부 용어 매칭
   result = applyGovernmentTerms(result);
+
+  // [advice from AI] 5-1. ★ 문맥 기반 수정 (정부용어 적용 후!)
+  // "국민을 국민의례를" → "국민의례를" 등
+  result = applyContextCorrections(result);
 
   // 6. 약어 매칭
   result = applyAbbreviations(result);

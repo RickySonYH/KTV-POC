@@ -71,7 +71,7 @@ function sendSTTLog(entry: STTLogEntry) {
       if (sttLogQueue.length > 0) {
         const toSend = [...sttLogQueue];
         sttLogQueue.length = 0;
-        fetch(`${API_URL}/api/admin/stt-log/batch`, {
+        fetch(`${API_URL}/api/v1/admin/stt-log/batch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(toSend)
