@@ -292,7 +292,7 @@ function App() {
   const [bufferingCountdown, setBufferingCountdown] = useState<number | null>(null);
   const [liveStreamReady, setLiveStreamReady] = useState(false);
   const liveStreamRef = useRef<EventSource | null>(null);
-
+  
   // [advice from AI] 자막 처리를 위한 ref들
   const lastBufferTextRef = useRef<string>('');  // 중복 버퍼 방지
   const lastAddedTextRef = useRef<string>('');   // 마지막으로 목록에 추가된 텍스트 (중복 방지)
@@ -450,7 +450,10 @@ function App() {
     // 버퍼도 리셋 (이미 lines로 처리됨)
     lastBufferForListRef.current = '';
     
-    console.log(`[SUBTITLE-LIST] 📨 "${rawText.substring(0, 50)}..." [${subtitle.startTime.toFixed(1)}s~${subtitle.endTime.toFixed(1)}s]`);
+    // [advice from AI] ★ 원본 vs 후처리 비교 로그
+    const processedPreview = postprocessText(rawText, true);
+    console.log(`[SUBTITLE-LIST] 📨 원본: "${rawText.substring(0, 60)}"`);
+    console.log(`[SUBTITLE-LIST] 📨 후처리: "${processedPreview?.substring(0, 60) || '(filtered)'}"`);
     
     lastLiveSpeakerRef.current = subtitle.speaker;
     
@@ -604,6 +607,12 @@ function App() {
     // ★ 4. 화면에 2줄로 표시 (liveSubtitleLines 업데이트)
     // [advice from AI] 화면 표시용에도 후처리 + 반복제거 적용!
     const displayTextProcessed = postprocessText(displayTextRef.current, false) || displayTextRef.current;
+    
+    // [advice from AI] ★ 화면 자막 원본/후처리 비교 (10회마다 1번만 로그)
+    if (Math.random() < 0.1) {
+      console.log(`[DISPLAY] 원본: "${displayTextRef.current.substring(0, 50)}..."`);
+      console.log(`[DISPLAY] 후처리: "${displayTextProcessed.substring(0, 50)}..."`);
+    }
     
     // [advice from AI] ★ 디바운스: 빠른 업데이트 모아서 처리 (100ms)
     // 후다닥 지나가는 현상 방지
@@ -1816,20 +1825,20 @@ function App() {
                 </div>
               ) : (
                 <>
-                  <div style={{ 
-                    maxHeight: '200px', 
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                  }}>
+                <div style={{ 
+                  maxHeight: '200px', 
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
                     {/* [advice from AI] ★ 시간순 정렬된 자막 목록 */}
                     {sortedSubtitles.map((sub) => {
                       const isEditing = editingSubtitleId === sub.id;
                       
                       return (
-                        <div 
-                          key={sub.id}
+                    <div 
+                      key={sub.id}
                           style={{
                             display: 'flex',
                             gap: '12px',
@@ -1843,39 +1852,39 @@ function App() {
                         >
                           {/* 시간 - 클릭 시 해당 시간으로 이동 */}
                           <span 
-                            onClick={() => {
-                              const videoElement = videoPlayerRef.current?.getVideoElement();
-                              if (videoElement) {
-                                videoElement.currentTime = sub.startTime;
-                                videoElement.play();
-                                console.log(`[APP] 🎯 자막 클릭 → ${sub.startTime.toFixed(1)}초로 이동`);
-                              }
-                            }}
-                            style={{ 
+                      onClick={() => {
+                        const videoElement = videoPlayerRef.current?.getVideoElement();
+                        if (videoElement) {
+                          videoElement.currentTime = sub.startTime;
+                          videoElement.play();
+                          console.log(`[APP] 🎯 자막 클릭 → ${sub.startTime.toFixed(1)}초로 이동`);
+                        }
+                      }}
+                      style={{
                               fontSize: '12px', 
                               color: '#666',
                               minWidth: '50px',
-                              cursor: 'pointer'
-                            }}
+                        cursor: 'pointer'
+                      }}
                             title="클릭하여 해당 시간으로 이동"
-                          >
-                            {Math.floor(sub.startTime / 60).toString().padStart(2, '0')}:
-                            {Math.floor(sub.startTime % 60).toString().padStart(2, '0')}
-                          </span>
+                    >
+                        {Math.floor(sub.startTime / 60).toString().padStart(2, '0')}:
+                        {Math.floor(sub.startTime % 60).toString().padStart(2, '0')}
+                      </span>
                           
                           {/* 화자 */}
-                          {sub.speaker && (
-                            <span style={{
-                              fontSize: '11px',
-                              background: '#0073cf',
-                              color: '#fff',
-                              padding: '2px 8px',
-                              borderRadius: '10px',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {sub.speaker}
-                            </span>
-                          )}
+                      {sub.speaker && (
+                        <span style={{
+                          fontSize: '11px',
+                          background: '#0073cf',
+                          color: '#fff',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {sub.speaker}
+                        </span>
+                      )}
                           
                           {/* 텍스트 - 편집 모드 */}
                           {isEditing ? (
@@ -1946,7 +1955,7 @@ function App() {
                               >
                                 취소
                               </button>
-                            </div>
+                    </div>
                           ) : (
                             /* 텍스트 - 일반 모드 (더블클릭으로 편집) */
                             <span 
@@ -1980,7 +1989,7 @@ function App() {
                               NEW
                             </span>
                           )}
-                        </div>
+                </div>
                       );
                     })}
                   </div>

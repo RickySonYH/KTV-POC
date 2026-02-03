@@ -210,6 +210,15 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           const lines = data.lines || [];
           const bufferText = data.buffer_transcription || data.buffer || '';
           const currentVideoTime = videoElementRef.current?.currentTime || 0;
+          
+          // [advice from AI] ★ 원본 데이터 로깅 (디버깅용)
+          if (lines.length > 0 || bufferText) {
+            console.log(`[WHISPER-RAW] 📨 원본:`, {
+              lines_count: lines.length,
+              buffer: bufferText ? bufferText.substring(0, 50) + '...' : '(empty)',
+              last_line: lines.length > 0 ? lines[lines.length - 1]?.text?.substring(0, 50) : '(none)'
+            });
+          }
 
           // 새로운 lines 처리 (최종 결과)
           for (let i = lastLinesCountRef.current; i < lines.length; i++) {
