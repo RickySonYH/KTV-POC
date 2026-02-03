@@ -48,6 +48,40 @@ const API_URL = import.meta.env.VITE_API_URL || (() => {
   return `http://${window.location.hostname}:6431`;
 })();
 
+// [advice from AI] ★ 백엔드 로그 수집 - AI가 직접 확인할 수 있도록 파일로 저장
+interface STTLogEntry {
+  timestamp?: string;
+  log_type: 'WHISPER_RAW' | 'SUBTITLE_LIST' | 'DISPLAY' | 'BUFFER' | 'FILTER';
+  raw_text: string;
+  processed_text: string;
+  video_time: number;
+  extra?: Record<string, unknown>;
+}
+
+const sttLogQueue: STTLogEntry[] = [];
+let sttLogFlushTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function sendSTTLog(entry: STTLogEntry) {
+  entry.timestamp = new Date().toISOString().substr(11, 12); // HH:MM:SS.mmm
+  sttLogQueue.push(entry);
+  
+  // 500ms 뒤에 일괄 전송 (성능 최적화)
+  if (!sttLogFlushTimeout) {
+    sttLogFlushTimeout = setTimeout(() => {
+      if (sttLogQueue.length > 0) {
+        const toSend = [...sttLogQueue];
+        sttLogQueue.length = 0;
+        fetch(`${API_URL}/api/admin/stt-log/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(toSend)
+        }).catch(() => {}); // 실패해도 무시
+      }
+      sttLogFlushTimeout = null;
+    }, 500);
+  }
+}
+
 function App() {
   // [advice from AI] 앱 시작 시 사전 데이터 로드
   useEffect(() => {
@@ -450,10 +484,19 @@ function App() {
     // 버퍼도 리셋 (이미 lines로 처리됨)
     lastBufferForListRef.current = '';
     
-    // [advice from AI] ★ 원본 vs 후처리 비교 로그
+    // [advice from AI] ★ 원본 vs 후처리 비교 로그 (콘솔 + 백엔드 파일)
     const processedPreview = postprocessText(rawText, true);
     console.log(`[SUBTITLE-LIST] 📨 원본: "${rawText.substring(0, 60)}"`);
     console.log(`[SUBTITLE-LIST] 📨 후처리: "${processedPreview?.substring(0, 60) || '(filtered)'}"`);
+    
+    // ★ 백엔드 로그 전송 (AI가 파일로 확인 가능)
+    sendSTTLog({
+      log_type: 'SUBTITLE_LIST',
+      raw_text: rawText,
+      processed_text: processedPreview || '(filtered)',
+      video_time: subtitle.startTime,
+      extra: { speaker: subtitle.speaker, endTime: subtitle.endTime }
+    });
     
     lastLiveSpeakerRef.current = subtitle.speaker;
     
@@ -562,12 +605,31 @@ function App() {
       const isHallucinationResult = isHallucination(rawText);
       if (isHallucinationResult) {
         console.log(`[BUFFER] 🚫 할루시네이션 스킵: "${rawText}" (${rawText.length}자)`);
+        
+        // ★ 필터링된 것도 백엔드 로그에 기록 (분석용)
+        sendSTTLog({
+          log_type: 'FILTER',
+          raw_text: rawText,
+          processed_text: '(hallucination filtered)',
+          video_time: videoPlayerRef.current?.getVideoElement()?.currentTime || 0,
+          extra: { reason: 'hallucination' }
+        });
+        
         return;  // 화면에 표시하지 않음
       }
     }
     
-    // [advice from AI] 실제 새 텍스트가 있을 때만 로그 출력
+    // [advice from AI] 실제 새 텍스트가 있을 때만 로그 출력 (콘솔 + 백엔드)
     console.log(`[BUFFER] 📥 "${rawText.substring(0, 40)}..." (${rawText.length}자)`)
+    
+    // ★ 백엔드 로그 전송 (버퍼 원본)
+    sendSTTLog({
+      log_type: 'BUFFER',
+      raw_text: rawText,
+      processed_text: '', // 버퍼는 아직 후처리 전
+      video_time: videoPlayerRef.current?.getVideoElement()?.currentTime || 0,
+      extra: { speaker: buffer.speaker }
+    });
     
     // ★ 2. 화자 변경 시 화면 초기화
     const speakerChanged = lastLiveSpeakerRef.current !== undefined && 
@@ -594,7 +656,7 @@ function App() {
         // 새 인식 시작
         lastCompletedTextRef.current = (lastCompletedTextRef.current + ' ' + prevBuffer).trim();
         newDisplayText = lastCompletedTextRef.current + ' ' + rawText;
-      } else {
+                } else {
         newDisplayText = lastCompletedTextRef.current ? lastCompletedTextRef.current + ' ' + rawText : rawText;
       }
     } else {
@@ -608,10 +670,19 @@ function App() {
     // [advice from AI] 화면 표시용에도 후처리 + 반복제거 적용!
     const displayTextProcessed = postprocessText(displayTextRef.current, false) || displayTextRef.current;
     
-    // [advice from AI] ★ 화면 자막 원본/후처리 비교 (10회마다 1번만 로그)
-    if (Math.random() < 0.1) {
+    // [advice from AI] ★ 화면 자막 원본/후처리 비교 → 백엔드 로그
+    // 5회마다 1번 전송 (성능 최적화, 충분한 샘플링)
+    if (Math.random() < 0.2) {
       console.log(`[DISPLAY] 원본: "${displayTextRef.current.substring(0, 50)}..."`);
       console.log(`[DISPLAY] 후처리: "${displayTextProcessed.substring(0, 50)}..."`);
+      
+      sendSTTLog({
+        log_type: 'DISPLAY',
+        raw_text: displayTextRef.current,
+        processed_text: displayTextProcessed,
+        video_time: videoPlayerRef.current?.getVideoElement()?.currentTime || 0,
+        extra: { displayLines: liveSubtitleLines }
+      });
     }
     
     // [advice from AI] ★ 디바운스: 빠른 업데이트 모아서 처리 (100ms)

@@ -463,3 +463,92 @@ async def websocket_logs(websocket: WebSocket):
     finally:
         LOG_CLIENTS.discard(websocket)
         logger.info(f"📡 로그 클라이언트 해제: 현재 {len(LOG_CLIENTS)}개")
+
+
+# =============================================================================
+# [advice from AI] STT 디버그 로그 파일 관리
+# 프론트엔드에서 전송한 원본/후처리 데이터를 파일로 저장
+# =============================================================================
+
+STT_LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "stt_debug.log")
+MAX_LOG_LINES = 500  # 최대 500줄 유지
+
+class STTLogEntry(BaseModel):
+    """STT 로그 항목"""
+    timestamp: str = ""
+    log_type: str  # WHISPER_RAW, SUBTITLE_LIST, DISPLAY, BUFFER
+    raw_text: str = ""
+    processed_text: str = ""
+    video_time: float = 0
+    extra: dict = {}
+
+def append_stt_log(entry: STTLogEntry):
+    """STT 로그를 파일에 추가 (최대 줄 수 유지)"""
+    try:
+        # 기존 로그 읽기
+        lines = []
+        if os.path.exists(STT_LOG_FILE):
+            with open(STT_LOG_FILE, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        
+        # 새 로그 추가
+        timestamp = entry.timestamp or datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        log_line = f"[{timestamp}] [{entry.log_type}] T={entry.video_time:.1f}s | 원본: {entry.raw_text[:80]} | 후처리: {entry.processed_text[:80]}"
+        if entry.extra:
+            log_line += f" | {json.dumps(entry.extra, ensure_ascii=False)}"
+        log_line += "\n"
+        lines.append(log_line)
+        
+        # 최대 줄 수 유지
+        if len(lines) > MAX_LOG_LINES:
+            lines = lines[-MAX_LOG_LINES:]
+        
+        # 파일 저장
+        os.makedirs(os.path.dirname(STT_LOG_FILE), exist_ok=True)
+        with open(STT_LOG_FILE, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+            
+    except Exception as e:
+        logger.error(f"STT 로그 저장 오류: {e}")
+
+@router.post("/stt-log")
+async def add_stt_log(entry: STTLogEntry):
+    """프론트엔드에서 STT 로그 수신"""
+    append_stt_log(entry)
+    return {"status": "ok"}
+
+@router.post("/stt-log/batch")
+async def add_stt_logs_batch(entries: List[STTLogEntry]):
+    """프론트엔드에서 STT 로그 일괄 수신"""
+    for entry in entries:
+        append_stt_log(entry)
+    return {"status": "ok", "count": len(entries)}
+
+@router.get("/stt-log")
+async def get_stt_log(lines: int = 100):
+    """STT 디버그 로그 조회"""
+    try:
+        if not os.path.exists(STT_LOG_FILE):
+            return {"logs": [], "total_lines": 0}
+        
+        with open(STT_LOG_FILE, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+        
+        # 최근 N줄 반환
+        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return {
+            "logs": [line.strip() for line in recent_lines],
+            "total_lines": len(all_lines)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/stt-log")
+async def clear_stt_log():
+    """STT 디버그 로그 초기화"""
+    try:
+        if os.path.exists(STT_LOG_FILE):
+            os.remove(STT_LOG_FILE)
+        return {"status": "cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
