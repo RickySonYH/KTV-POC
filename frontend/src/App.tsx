@@ -302,6 +302,10 @@ function App() {
   
   // [advice from AI] 묵음 후 자막 페이드아웃을 위한 타이머 ref
   const silenceTimeoutRef = useRef<number | null>(null);
+  
+  // [advice from AI] ★ 화면 자막 디바운스 - 빠른 업데이트 모아서 처리
+  const displayDebounceRef = useRef<number | null>(null);
+  const pendingDisplayTextRef = useRef<string>('');  // 대기 중인 텍스트
 
   // [advice from AI] ★ 새 자막 규칙: 윗줄/아랫줄 분리 관리
   // - 아랫줄에 글자 누적 → 20자 도달 → 아랫줄 전체를 윗줄로 이동 → 아랫줄 리셋
@@ -589,9 +593,19 @@ function App() {
     displayTextRef.current = newDisplayText.trim();
     
     // ★ 4. 화면에 2줄로 표시 (liveSubtitleLines 업데이트)
-    // [advice from AI] 화면 표시용에도 후처리 적용! (국민의뢰→국민의례 등)
+    // [advice from AI] 화면 표시용에도 후처리 + 반복제거 적용!
     const displayTextProcessed = postprocessText(displayTextRef.current, false) || displayTextRef.current;
-    updateDisplayLines(displayTextProcessed);
+    
+    // [advice from AI] ★ 디바운스: 빠른 업데이트 모아서 처리 (100ms)
+    // 후다닥 지나가는 현상 방지
+    pendingDisplayTextRef.current = displayTextProcessed;
+    
+    if (displayDebounceRef.current) {
+      clearTimeout(displayDebounceRef.current);
+    }
+    displayDebounceRef.current = window.setTimeout(() => {
+      updateDisplayLines(pendingDisplayTextRef.current);
+    }, 100);
     
     // ★ 5. 묵음 타이머 리셋 - 새 텍스트가 오면 타이머 재시작
     if (silenceTimeoutRef.current) {

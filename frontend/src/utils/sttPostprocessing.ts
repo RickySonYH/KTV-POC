@@ -428,6 +428,10 @@ export function postprocessText(text: string, forSubtitleList: boolean = false):
 
   // 1. 텍스트 정리
   let result = cleanText(text);
+  
+  // [advice from AI] 1-1. ★ 반복 패턴 제거 먼저! (가장 중요)
+  // "국기에 대하여 정책 국기에 대하여 경례" → "국기에 대하여 경례"
+  result = removeRepetitions(result);
 
   // [advice from AI] 2-1. 강력한 할루시네이션 패턴은 길이와 관계없이 항상 필터
   for (const pattern of STRONG_HALLUCINATION_PATTERNS) {
