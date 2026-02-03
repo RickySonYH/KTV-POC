@@ -1,0 +1,28 @@
+/* [advice from AI] KTV 스타일 CSS 변수 정의 */
+
+:root {
+  /* KTV 메인 컬러 */
+  --ktv-primary: #0073cf;
+  --ktv-primary-dark: #005ba1;
+  --ktv-primary-light: #e8f4fc;
+  
+  /* 정부/공공기관 스타일 컬러 */
+  --ktv-accent: #dc3545;
+  --ktv-text: #333333;
+  --ktv-text-light: #666666;
+  --ktv-border: #e0e0e0;
+  --ktv-background: #f8f9fa;
+  --ktv-white: #ffffff;
+  
+  /* 화자 분리 컬러 */
+  --speaker-1: #0073cf;
+  --speaker-2: #28a745;
+  --speaker-3: #fd7e14;
+  --speaker-4: #6f42c1;
+  
+  /* 레이아웃 */
+  --header-height: 80px;
+  --content-max-width: 1400px;
+  --border-radius: 8px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}

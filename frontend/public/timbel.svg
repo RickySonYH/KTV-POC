@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- [advice from AI] KTV 로고 파비콘 - 페이지 내 로고와 동일한 스타일 -->
+  <circle cx="16" cy="16" r="15" fill="#0056b3"/>
+  <text x="16" y="20" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white" text-anchor="middle">KTV</text>
+</svg>

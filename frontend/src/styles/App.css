@@ -1,0 +1,451 @@
+/* [advice from AI] KTV 스타일 메인 CSS */
+
+@import './variables.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--ktv-background);
+  color: var(--ktv-text);
+  line-height: 1.6;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 헤더 스타일 */
+.header {
+  background: var(--ktv-white);
+  border-bottom: 1px solid var(--ktv-border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-top {
+  background: var(--ktv-primary);
+  color: var(--ktv-white);
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.header-top-inner {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-main {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--ktv-text);
+}
+
+.logo-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--ktv-primary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ktv-white);
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.logo-text {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ktv-text);
+}
+
+.logo-text span {
+  color: var(--ktv-primary);
+}
+
+.nav-menu {
+  display: flex;
+  gap: 32px;
+}
+
+.nav-item {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ktv-text);
+  text-decoration: none;
+  padding: 8px 0;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.nav-item:hover,
+.nav-item.active {
+  color: var(--ktv-primary);
+  border-bottom-color: var(--ktv-primary);
+}
+
+/* 메인 콘텐츠 */
+.main-content {
+  flex: 1;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 32px 24px;
+  width: 100%;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ktv-text);
+  margin-bottom: 8px;
+}
+
+.page-subtitle {
+  font-size: 16px;
+  color: var(--ktv-text-light);
+  margin-bottom: 32px;
+}
+
+/* 카드 스타일 */
+.card {
+  background: var(--ktv-white);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ktv-text);
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--ktv-primary);
+}
+
+/* 파일 업로드 영역 */
+.upload-area {
+  border: 2px dashed var(--ktv-border);
+  border-radius: var(--border-radius);
+  padding: 48px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--ktv-background);
+}
+
+.upload-area:hover {
+  border-color: var(--ktv-primary);
+  background: var(--ktv-primary-light);
+}
+
+.upload-area.drag-over {
+  border-color: var(--ktv-primary);
+  background: var(--ktv-primary-light);
+}
+
+.upload-icon {
+  font-size: 48px;
+  color: var(--ktv-primary);
+  margin-bottom: 16px;
+}
+
+.upload-text {
+  font-size: 16px;
+  color: var(--ktv-text);
+  margin-bottom: 8px;
+}
+
+.upload-hint {
+  font-size: 14px;
+  color: var(--ktv-text-light);
+}
+
+/* 비디오 플레이어 */
+.video-container {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+.video-player {
+  width: 100%;
+  max-height: 500px;
+  display: block;
+}
+
+.video-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--ktv-background);
+  border-radius: 0 0 var(--border-radius) var(--border-radius);
+}
+
+.video-name {
+  font-weight: 500;
+  color: var(--ktv-text);
+}
+
+/* 자막 표시 영역 */
+.subtitle-container {
+  margin-top: 24px;
+}
+
+.subtitle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.subtitle-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ktv-text-light);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+}
+
+.status-dot.processing {
+  background: var(--ktv-accent);
+  animation: pulse 1s infinite;
+}
+
+.status-dot.completed {
+  background: #28a745;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.subtitle-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--ktv-border);
+  border-radius: var(--border-radius);
+}
+
+.subtitle-item {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--ktv-border);
+  transition: background 0.2s;
+}
+
+.subtitle-item:last-child {
+  border-bottom: none;
+}
+
+.subtitle-item.active {
+  background: var(--ktv-primary-light);
+}
+
+.subtitle-time {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-family: 'Consolas', monospace;
+  color: var(--ktv-text-light);
+  min-width: 120px;
+}
+
+.subtitle-speaker {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ktv-white);
+  min-width: 70px;
+  text-align: center;
+}
+
+.subtitle-speaker.speaker-1 { background: var(--speaker-1); }
+.subtitle-speaker.speaker-2 { background: var(--speaker-2); }
+.subtitle-speaker.speaker-3 { background: var(--speaker-3); }
+.subtitle-speaker.speaker-4 { background: var(--speaker-4); }
+
+.subtitle-text {
+  flex: 1;
+  font-size: 15px;
+  color: var(--ktv-text);
+  line-height: 1.6;
+}
+
+/* 버튼 스타일 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--border-radius);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: var(--ktv-primary);
+  color: var(--ktv-white);
+}
+
+.btn-primary:hover {
+  background: var(--ktv-primary-dark);
+}
+
+.btn-secondary {
+  background: var(--ktv-white);
+  color: var(--ktv-text);
+  border: 1px solid var(--ktv-border);
+}
+
+.btn-secondary:hover {
+  background: var(--ktv-background);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-group {
+  display: flex;
+  gap: 12px;
+}
+
+/* 레이아웃 그리드 */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 실시간 자막 오버레이 */
+.subtitle-overlay {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: var(--ktv-white);
+  padding: 12px 24px;
+  border-radius: var(--border-radius);
+  font-size: 18px;
+  max-width: 80%;
+  text-align: center;
+}
+
+.subtitle-overlay .speaker-tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  margin-right: 8px;
+}
+
+/* 모니터링 상태 */
+.monitoring-panel {
+  background: var(--ktv-white);
+  border-radius: var(--border-radius);
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.monitoring-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ktv-border);
+}
+
+.monitoring-item:last-child {
+  border-bottom: none;
+}
+
+.monitoring-label {
+  color: var(--ktv-text-light);
+  font-size: 14px;
+}
+
+.monitoring-value {
+  font-weight: 500;
+  color: var(--ktv-text);
+}
+
+.monitoring-value.good {
+  color: #28a745;
+}
+
+.monitoring-value.warning {
+  color: #fd7e14;
+}
+
+.monitoring-value.error {
+  color: var(--ktv-accent);
+}
+
+/* 푸터 */
+.footer {
+  background: var(--ktv-text);
+  color: var(--ktv-white);
+  padding: 24px;
+  text-align: center;
+  font-size: 14px;
+}
+
+/* [advice from AI] YouTube 스타일 타이핑 커서 깜빡임 */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* [advice from AI] 실시간 처리 중 펄스 애니메이션 */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

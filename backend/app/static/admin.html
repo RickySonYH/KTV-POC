@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT 사전/필터 관리</title>
+    <style>
+        /* [advice from AI] 사용자 선호: 아이보리톤 배경, 텍스트 위주 심플 디자인 */
+        :root {
+            --bg-primary: #FDFBF7;
+            --bg-secondary: #F5F2EB;
+            --text-primary: #2C2C2C;
+            --text-secondary: #5A5A5A;
+            --border-color: #D4D0C8;
+            --accent: #4A6741;
+            --accent-hover: #3D5536;
+            --danger: #B54834;
+            --success: #4A6741;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        
+        .subtitle {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        
+        /* 통계 섹션 */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        /* 탭 네비게이션 */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1.5rem;
+        }
+        
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            color: var(--text-primary);
+        }
+        
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        
+        /* 탭 콘텐츠 */
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* 입력 폼 */
+        .form-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-size: 0.875rem;
+            background: #fff;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 3px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+        
+        .btn-danger {
+            background: transparent;
+            color: var(--danger);
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .btn-danger:hover {
+            background: rgba(181, 72, 52, 0.1);
+        }
+        
+        /* 아이템 목록 */
+        .item-list {
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.875rem;
+        }
+        
+        .item:last-child {
+            border-bottom: none;
+        }
+        
+        .item:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .item-key {
+            color: var(--text-primary);
+        }
+        
+        .item-value {
+            color: var(--text-secondary);
+            margin-left: 0.5rem;
+        }
+        
+        .item-arrow {
+            color: var(--accent);
+            margin: 0 0.5rem;
+        }
+        
+        /* 메시지 */
+        .message {
+            padding: 0.75rem;
+            border-radius: 3px;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .message.success {
+            background: rgba(74, 103, 65, 0.1);
+            color: var(--success);
+        }
+        
+        .message.error {
+            background: rgba(181, 72, 52, 0.1);
+            color: var(--danger);
+        }
+        
+        /* 설명 텍스트 */
+        .description {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+        
+        /* 로딩 */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+        
+        /* 검색 */
+        .search-box {
+            margin-bottom: 1rem;
+        }
+        
+        .search-box input {
+            width: 100%;
+        }
+        
+        /* [advice from AI] 실시간 로그 스타일 */
+        .log-container {
+            background: #1E1E1E;
+            border-radius: 4px;
+            padding: 1rem;
+            height: 500px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.75rem;
+            line-height: 1.5;
+        }
+        
+        .log-entry {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.125rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .log-time {
+            color: #6A9955;
+            flex-shrink: 0;
+        }
+        
+        .log-level {
+            flex-shrink: 0;
+            width: 50px;
+            text-align: center;
+            border-radius: 2px;
+            font-size: 0.65rem;
+            padding: 0 0.25rem;
+        }
+        
+        .log-level.INFO { background: #264F78; color: #9CDCFE; }
+        .log-level.WARNING { background: #7B5C00; color: #DCDCAA; }
+        .log-level.ERROR { background: #5A1D1D; color: #F48771; }
+        .log-level.DEBUG { background: #3B3B3B; color: #808080; }
+        
+        .log-message {
+            color: #D4D4D4;
+            word-break: break-all;
+        }
+        
+        .log-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            align-items: center;
+        }
+        
+        .log-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #808080;
+        }
+        
+        .status-dot.connected {
+            background: #4EC9B0;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .log-filter {
+            display: flex;
+            gap: 0.25rem;
+        }
+        
+        .log-filter button {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.7rem;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .log-filter button.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        
+        .log-search {
+            flex: 1;
+            max-width: 300px;
+        }
+        
+        .log-search input {
+            width: 100%;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>STT 사전/필터 관리</h1>
+            <p class="subtitle">비속어 필터, 고유명사, 정부 용어 사전을 관리합니다</p>
+        </header>
+        
+        <div class="stats" id="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="stat-profanity">-</div>
+                <div class="stat-label">비속어 필터</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-sensitive">-</div>
+                <div class="stat-label">민감정보 패턴</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-proper">-</div>
+                <div class="stat-label">고유명사</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-govt">-</div>
+                <div class="stat-label">정부 용어</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-abbr">-</div>
+                <div class="stat-label">약어</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-hallucination">-</div>
+                <div class="stat-label">할루시네이션</div>
+            </div>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" data-tab="subtitle-rules">자막 규칙</button>
+            <button class="tab" data-tab="profanity">비속어 필터</button>
+            <button class="tab" data-tab="proper-nouns">고유명사</button>
+            <button class="tab" data-tab="government-dict">정부 용어</button>
+            <button class="tab" data-tab="abbreviations">약어</button>
+            <button class="tab" data-tab="hallucination">할루시네이션</button>
+            <button class="tab" data-tab="sensitive-patterns">민감정보 (읽기전용)</button>
+            <button class="tab" data-tab="logs">실시간 로그</button>
+        </div>
+        
+        <div id="message"></div>
+        
+        <!-- [advice from AI] 자막 규칙 설정 -->
+        <div class="tab-content active" id="tab-subtitle-rules">
+            <p class="description">실시간 자막 표시 규칙을 설정합니다. 변경사항은 즉시 프론트엔드에 적용됩니다.</p>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+                <!-- 줄 수 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">자막 줄 수</label>
+                    <input type="number" id="rule-max-lines" min="1" max="5" value="2" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">화면에 표시할 자막 줄 수 (1~5)</p>
+                </div>
+                
+                <!-- 글자 수 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">한 줄당 최대 글자 수</label>
+                    <input type="number" id="rule-max-chars" min="10" max="50" value="18" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">한 줄에 표시할 최대 글자 수 (10~50)</p>
+                </div>
+                
+                <!-- 페이드아웃 시간 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">묵음 시 페이드아웃 (ms)</label>
+                    <input type="number" id="rule-fade-timeout" min="1000" max="10000" step="500" value="3000" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">묵음이 지속되면 자막 페이드아웃 (1000~10000ms)</p>
+                </div>
+                
+                <!-- 표시 지연 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">자막 표시 지연 (ms)</label>
+                    <input type="number" id="rule-display-delay" min="0" max="5000" step="100" value="0" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">자막 표시 전 대기 시간 (0=실시간)</p>
+                </div>
+                
+                <!-- 최소 표시 시간 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">최소 표시 시간 (ms)</label>
+                    <input type="number" id="rule-min-display" min="500" max="5000" step="100" value="1000" 
+                           style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">자막이 최소한 표시되어야 하는 시간</p>
+                </div>
+                
+                <!-- 문장 끝 줄바꿈 -->
+                <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="rule-break-sentence" checked 
+                               style="width: 18px; height: 18px; accent-color: var(--accent);">
+                        <span style="font-weight: 500;">문장 끝에서 줄바꿈</span>
+                    </label>
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem;">마침표(.), 물음표(?), 느낌표(!) 후 줄바꿈</p>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn-primary" onclick="saveSubtitleRules()">저장</button>
+                <button style="background: var(--bg-secondary); color: var(--text-primary);" onclick="resetSubtitleRules()">기본값으로 초기화</button>
+            </div>
+            
+            <div style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px; margin-top: 1.5rem;">
+                <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">자막 표시 방식</h3>
+                <ul style="font-size: 0.85rem; color: var(--text-secondary); margin-left: 1.5rem;">
+                    <li>아랫줄부터 채워지고, 꽉 차면 윗줄로 이동</li>
+                    <li>문장이 끝나면 (마침표 등) 즉시 줄바꿈</li>
+                    <li>묵음이 지속되면 페이드아웃으로 정리</li>
+                    <li>후처리 규칙 변경 시 이미 표시된 자막도 교체 가능</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- 비속어 필터 -->
+        <div class="tab-content" id="tab-profanity">
+            <p class="description">방송 사고 방지를 위한 비속어 패턴입니다. 해당 단어가 감지되면 ***로 대체됩니다.</p>
+            <div class="form-row">
+                <input type="text" id="profanity-input" placeholder="비속어 패턴 입력">
+                <button class="btn-primary" onclick="addProfanity()">추가</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="profanity-search" placeholder="검색..." oninput="filterList('profanity')">
+            </div>
+            <div class="item-list" id="profanity-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- 고유명사 -->
+        <div class="tab-content" id="tab-proper-nouns">
+            <p class="description">인명, 기관명, 지명 등 고유명사 교정 사전입니다. (오인식 → 정확한 표현)</p>
+            <div class="form-row">
+                <input type="text" id="proper-key" placeholder="오인식 (예: 이 재명)">
+                <input type="text" id="proper-value" placeholder="정확한 표현 (예: 이재명)">
+                <button class="btn-primary" onclick="addProperNoun()">추가</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="proper-search" placeholder="검색..." oninput="filterList('proper')">
+            </div>
+            <div class="item-list" id="proper-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- 정부 용어 -->
+        <div class="tab-content" id="tab-government-dict">
+            <p class="description">국회/국무회의 관련 용어 교정 사전입니다. (오인식 → 정확한 표현)</p>
+            <div class="form-row">
+                <input type="text" id="govt-key" placeholder="오인식 (예: 국민의뢰)">
+                <input type="text" id="govt-value" placeholder="정확한 표현 (예: 국민의례)">
+                <button class="btn-primary" onclick="addGovernmentTerm()">추가</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="govt-search" placeholder="검색..." oninput="filterList('govt')">
+            </div>
+            <div class="item-list" id="govt-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- 약어 -->
+        <div class="tab-content" id="tab-abbreviations">
+            <p class="description">약어 변환 사전입니다. (한글 발음 → 영문 약어)</p>
+            <div class="form-row">
+                <input type="text" id="abbr-key" placeholder="한글 발음 (예: 아이엠에프)">
+                <input type="text" id="abbr-value" placeholder="영문 약어 (예: IMF)">
+                <button class="btn-primary" onclick="addAbbreviation()">추가</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="abbr-search" placeholder="검색..." oninput="filterList('abbr')">
+            </div>
+            <div class="item-list" id="abbr-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- [advice from AI] 할루시네이션 패턴 -->
+        <div class="tab-content" id="tab-hallucination">
+            <p class="description">Whisper STT가 잘못 인식하는 할루시네이션 패턴입니다. 정규식 형태로 입력하세요.</p>
+            <div class="form-row">
+                <input type="text" id="hallucination-input" placeholder="할루시네이션 패턴 (정규식, 예: ^감사합니다\.?$)">
+                <button class="btn-primary" onclick="addHallucination()">추가</button>
+            </div>
+            <div class="search-box">
+                <input type="text" id="hallucination-search" placeholder="검색..." oninput="filterList('hallucination')">
+            </div>
+            <div class="item-list" id="hallucination-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- 민감정보 패턴 -->
+        <div class="tab-content" id="tab-sensitive-patterns">
+            <p class="description">개인정보 보호를 위한 민감정보 패턴입니다. (수정 불가)</p>
+            <div class="item-list" id="sensitive-list">
+                <div class="loading">불러오는 중...</div>
+            </div>
+        </div>
+        
+        <!-- [advice from AI] 실시간 로그 -->
+        <div class="tab-content" id="tab-logs">
+            <p class="description">STT 서비스의 실시간 처리 로그입니다.</p>
+            
+            <div class="log-controls">
+                <div class="log-status">
+                    <span class="status-dot" id="log-status-dot"></span>
+                    <span id="log-status-text">연결 대기중</span>
+                </div>
+                
+                <div class="log-filter">
+                    <button class="active" data-level="all" onclick="setLogFilter('all')">전체</button>
+                    <button data-level="INFO" onclick="setLogFilter('INFO')">INFO</button>
+                    <button data-level="WARNING" onclick="setLogFilter('WARNING')">WARNING</button>
+                    <button data-level="ERROR" onclick="setLogFilter('ERROR')">ERROR</button>
+                </div>
+                
+                <div class="log-search">
+                    <input type="text" id="log-search" placeholder="로그 검색..." oninput="filterLogs()">
+                </div>
+                
+                <button class="btn-primary" onclick="clearLogs()">지우기</button>
+                <button class="btn-primary" onclick="toggleAutoScroll()">
+                    <span id="autoscroll-text">자동 스크롤 ON</span>
+                </button>
+            </div>
+            
+            <div class="log-container" id="log-container">
+                <div class="loading">로그 연결중...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '/api/v1/admin';
+        
+        // 탭 전환
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                tab.classList.add('active');
+                document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+            });
+        });
+        
+        // 메시지 표시
+        function showMessage(text, type = 'success') {
+            const msg = document.getElementById('message');
+            msg.className = `message ${type}`;
+            msg.textContent = text;
+            setTimeout(() => msg.textContent = '', 3000);
+        }
+        
+        // API 호출
+        async function apiCall(endpoint, method = 'GET', body = null) {
+            const options = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) options.body = JSON.stringify(body);
+            const res = await fetch(API_BASE + endpoint, options);
+            return res.json();
+        }
+        
+        // 통계 로드
+        async function loadStats() {
+            const stats = await apiCall('/stats');
+            document.getElementById('stat-profanity').textContent = stats.profanity_count;
+            document.getElementById('stat-sensitive').textContent = stats.sensitive_count;
+            document.getElementById('stat-proper').textContent = stats.proper_noun_count;
+            document.getElementById('stat-govt').textContent = stats.government_dict_count;
+            document.getElementById('stat-abbr').textContent = stats.abbreviation_count;
+            document.getElementById('stat-hallucination').textContent = stats.hallucination_count;
+        }
+        
+        // 비속어 목록 로드
+        async function loadProfanity() {
+            const data = await apiCall('/profanity');
+            const list = document.getElementById('profanity-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item" data-value="${item}">
+                    <span class="item-key">${item}</span>
+                    <button class="btn-danger" onclick="deleteProfanity('${item}')">삭제</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addProfanity() {
+            const input = document.getElementById('profanity-input');
+            if (!input.value.trim()) return;
+            await apiCall('/profanity', 'POST', { pattern: input.value.trim() });
+            input.value = '';
+            loadProfanity();
+            loadStats();
+            showMessage('추가되었습니다');
+        }
+        
+        async function deleteProfanity(pattern) {
+            await apiCall(`/profanity/${encodeURIComponent(pattern)}`, 'DELETE');
+            loadProfanity();
+            loadStats();
+            showMessage('삭제되었습니다');
+        }
+        
+        // 고유명사 목록 로드
+        async function loadProperNouns() {
+            const data = await apiCall('/proper-nouns');
+            const list = document.getElementById('proper-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item" data-value="${item.key}">
+                    <span>
+                        <span class="item-key">${item.key}</span>
+                        <span class="item-arrow">→</span>
+                        <span class="item-value">${item.value}</span>
+                    </span>
+                    <button class="btn-danger" onclick="deleteProperNoun('${item.key}')">삭제</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addProperNoun() {
+            const key = document.getElementById('proper-key');
+            const value = document.getElementById('proper-value');
+            if (!key.value.trim() || !value.value.trim()) return;
+            await apiCall('/proper-nouns', 'POST', { key: key.value.trim(), value: value.value.trim() });
+            key.value = '';
+            value.value = '';
+            loadProperNouns();
+            loadStats();
+            showMessage('추가되었습니다');
+        }
+        
+        async function deleteProperNoun(key) {
+            await apiCall(`/proper-nouns/${encodeURIComponent(key)}`, 'DELETE');
+            loadProperNouns();
+            loadStats();
+            showMessage('삭제되었습니다');
+        }
+        
+        // 정부 용어 목록 로드
+        async function loadGovernmentDict() {
+            const data = await apiCall('/government-dict');
+            const list = document.getElementById('govt-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item" data-value="${item.key}">
+                    <span>
+                        <span class="item-key">${item.key}</span>
+                        <span class="item-arrow">→</span>
+                        <span class="item-value">${item.value}</span>
+                    </span>
+                    <button class="btn-danger" onclick="deleteGovernmentTerm('${item.key}')">삭제</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addGovernmentTerm() {
+            const key = document.getElementById('govt-key');
+            const value = document.getElementById('govt-value');
+            if (!key.value.trim() || !value.value.trim()) return;
+            await apiCall('/government-dict', 'POST', { key: key.value.trim(), value: value.value.trim() });
+            key.value = '';
+            value.value = '';
+            loadGovernmentDict();
+            loadStats();
+            showMessage('추가되었습니다');
+        }
+        
+        async function deleteGovernmentTerm(key) {
+            await apiCall(`/government-dict/${encodeURIComponent(key)}`, 'DELETE');
+            loadGovernmentDict();
+            loadStats();
+            showMessage('삭제되었습니다');
+        }
+        
+        // 약어 목록 로드
+        async function loadAbbreviations() {
+            const data = await apiCall('/abbreviations');
+            const list = document.getElementById('abbr-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item" data-value="${item.key}">
+                    <span>
+                        <span class="item-key">${item.key}</span>
+                        <span class="item-arrow">→</span>
+                        <span class="item-value">${item.value}</span>
+                    </span>
+                    <button class="btn-danger" onclick="deleteAbbreviation('${item.key}')">삭제</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addAbbreviation() {
+            const key = document.getElementById('abbr-key');
+            const value = document.getElementById('abbr-value');
+            if (!key.value.trim() || !value.value.trim()) return;
+            await apiCall('/abbreviations', 'POST', { key: key.value.trim(), value: value.value.trim() });
+            key.value = '';
+            value.value = '';
+            loadAbbreviations();
+            loadStats();
+            showMessage('추가되었습니다');
+        }
+        
+        async function deleteAbbreviation(key) {
+            await apiCall(`/abbreviations/${encodeURIComponent(key)}`, 'DELETE');
+            loadAbbreviations();
+            loadStats();
+            showMessage('삭제되었습니다');
+        }
+        
+        // 민감정보 패턴 로드
+        async function loadSensitivePatterns() {
+            const data = await apiCall('/sensitive-patterns');
+            const list = document.getElementById('sensitive-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item">
+                    <span>
+                        <span class="item-key">${item.pattern}</span>
+                        <span class="item-arrow">→</span>
+                        <span class="item-value">${item.replacement}</span>
+                    </span>
+                </div>
+            `).join('');
+        }
+        
+        // [advice from AI] 할루시네이션 패턴 관리
+        async function loadHallucination() {
+            const data = await apiCall('/hallucination');
+            const list = document.getElementById('hallucination-list');
+            list.innerHTML = data.items.map(item => `
+                <div class="item" data-value="${escapeHtml(item)}">
+                    <span class="item-key">${escapeHtml(item)}</span>
+                    <button class="btn-danger" onclick="deleteHallucination('${encodeURIComponent(item)}')">삭제</button>
+                </div>
+            `).join('');
+        }
+        
+        async function addHallucination() {
+            const input = document.getElementById('hallucination-input');
+            if (!input.value.trim()) return;
+            await apiCall('/hallucination', 'POST', { pattern: input.value.trim() });
+            input.value = '';
+            loadHallucination();
+            loadStats();
+            showMessage('추가되었습니다');
+        }
+        
+        async function deleteHallucination(pattern) {
+            await apiCall(`/hallucination/${pattern}`, 'DELETE');
+            loadHallucination();
+            loadStats();
+            showMessage('삭제되었습니다');
+        }
+        
+        // 검색 필터
+        function filterList(type) {
+            const searchMap = {
+                'profanity': { search: 'profanity-search', list: 'profanity-list' },
+                'proper': { search: 'proper-search', list: 'proper-list' },
+                'govt': { search: 'govt-search', list: 'govt-list' },
+                'abbr': { search: 'abbr-search', list: 'abbr-list' },
+                'hallucination': { search: 'hallucination-search', list: 'hallucination-list' }
+            };
+            
+            const config = searchMap[type];
+            const searchText = document.getElementById(config.search).value.toLowerCase();
+            const items = document.querySelectorAll(`#${config.list} .item`);
+            
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                item.style.display = text.includes(searchText) ? 'flex' : 'none';
+            });
+        }
+        
+        // =================================================================
+        // [advice from AI] 실시간 로그 스트리밍
+        // =================================================================
+        
+        let logSocket = null;
+        let logFilter = 'all';
+        let autoScroll = true;
+        let allLogs = [];
+        
+        function connectLogSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/api/v1/admin/logs`;
+            
+            logSocket = new WebSocket(wsUrl);
+            
+            logSocket.onopen = () => {
+                document.getElementById('log-status-dot').classList.add('connected');
+                document.getElementById('log-status-text').textContent = '연결됨';
+                document.getElementById('log-container').innerHTML = '';
+            };
+            
+            logSocket.onmessage = (event) => {
+                const data = event.data;
+                
+                // ping/pong 처리
+                if (data === 'ping') {
+                    logSocket.send('pong');
+                    return;
+                }
+                
+                try {
+                    const log = JSON.parse(data);
+                    allLogs.push(log);
+                    
+                    // 최대 1000개 유지
+                    if (allLogs.length > 1000) {
+                        allLogs.shift();
+                    }
+                    
+                    appendLog(log);
+                } catch (e) {
+                    // JSON 파싱 실패 시 무시
+                }
+            };
+            
+            logSocket.onclose = () => {
+                document.getElementById('log-status-dot').classList.remove('connected');
+                document.getElementById('log-status-text').textContent = '연결 끊김 - 재연결 중...';
+                
+                // 3초 후 재연결
+                setTimeout(connectLogSocket, 3000);
+            };
+            
+            logSocket.onerror = (error) => {
+                console.error('Log WebSocket error:', error);
+            };
+        }
+        
+        function appendLog(log) {
+            // 필터 체크
+            if (logFilter !== 'all' && log.level !== logFilter) {
+                return;
+            }
+            
+            // 검색 체크
+            const searchText = document.getElementById('log-search').value.toLowerCase();
+            if (searchText && !log.message.toLowerCase().includes(searchText)) {
+                return;
+            }
+            
+            const container = document.getElementById('log-container');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">${log.timestamp}</span>
+                <span class="log-level ${log.level}">${log.level}</span>
+                <span class="log-message">${escapeHtml(log.message)}</span>
+            `;
+            
+            container.appendChild(entry);
+            
+            // 자동 스크롤
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function setLogFilter(level) {
+            logFilter = level;
+            
+            // 버튼 상태 업데이트
+            document.querySelectorAll('.log-filter button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.level === level);
+            });
+            
+            // 로그 다시 렌더링
+            rerenderLogs();
+        }
+        
+        function filterLogs() {
+            rerenderLogs();
+        }
+        
+        function rerenderLogs() {
+            const container = document.getElementById('log-container');
+            container.innerHTML = '';
+            
+            allLogs.forEach(log => appendLog(log));
+        }
+        
+        function clearLogs() {
+            allLogs = [];
+            document.getElementById('log-container').innerHTML = '';
+        }
+        
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoscroll-text').textContent = 
+                autoScroll ? '자동 스크롤 ON' : '자동 스크롤 OFF';
+        }
+        
+        // 탭 전환 시 로그 연결
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                if (tab.dataset.tab === 'logs' && !logSocket) {
+                    connectLogSocket();
+                }
+            });
+        });
+        
+        // =================================================================
+        // [advice from AI] STT 모드 설정
+        // =================================================================
+        
+        async function loadSTTMode() {
+            try {
+                const data = await apiCall('/stt-mode');
+                document.getElementById('mode-' + data.mode).checked = true;
+                
+                // 선택된 라벨 스타일
+                document.querySelectorAll('input[name="stt-mode"]').forEach(radio => {
+                    const label = radio.closest('label');
+                    label.style.borderColor = radio.checked ? 'var(--accent)' : 'var(--border-color)';
+                    label.style.background = radio.checked ? 'rgba(74, 103, 65, 0.05)' : 'transparent';
+                });
+            } catch (e) {
+                console.error('Failed to load STT mode:', e);
+            }
+        }
+        
+        async function saveSTTMode() {
+            const mode = document.querySelector('input[name="stt-mode"]:checked')?.value;
+            if (!mode) {
+                showMessage('모드를 선택해주세요', 'error');
+                return;
+            }
+            
+            try {
+                await apiCall('/stt-mode', 'POST', { mode });
+                showMessage('STT 모드가 저장되었습니다');
+                loadSTTMode();
+            } catch (e) {
+                showMessage('저장 실패: ' + e.message, 'error');
+            }
+        }
+        
+        // 라디오 버튼 스타일 업데이트
+        document.querySelectorAll('input[name="stt-mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                document.querySelectorAll('input[name="stt-mode"]').forEach(r => {
+                    const label = r.closest('label');
+                    label.style.borderColor = r.checked ? 'var(--accent)' : 'var(--border-color)';
+                    label.style.background = r.checked ? 'rgba(74, 103, 65, 0.05)' : 'transparent';
+                });
+            });
+        });
+        
+        // =================================================================
+        // [advice from AI] 자막 규칙 관리
+        // =================================================================
+        
+        async function loadSubtitleRules() {
+            try {
+                const data = await apiCall('/subtitle-rules');
+                document.getElementById('rule-max-lines').value = data.max_lines;
+                document.getElementById('rule-max-chars').value = data.max_chars_per_line;
+                document.getElementById('rule-fade-timeout').value = data.fade_timeout_ms;
+                document.getElementById('rule-display-delay').value = data.display_delay_ms;
+                document.getElementById('rule-min-display').value = data.min_display_ms;
+                document.getElementById('rule-break-sentence').checked = data.break_on_sentence_end;
+            } catch (e) {
+                console.error('Failed to load subtitle rules:', e);
+            }
+        }
+        
+        async function saveSubtitleRules() {
+            const rules = {
+                max_lines: parseInt(document.getElementById('rule-max-lines').value),
+                max_chars_per_line: parseInt(document.getElementById('rule-max-chars').value),
+                fade_timeout_ms: parseInt(document.getElementById('rule-fade-timeout').value),
+                display_delay_ms: parseInt(document.getElementById('rule-display-delay').value),
+                min_display_ms: parseInt(document.getElementById('rule-min-display').value),
+                break_on_sentence_end: document.getElementById('rule-break-sentence').checked,
+            };
+            
+            try {
+                await apiCall('/subtitle-rules', 'POST', rules);
+                showMessage('자막 규칙이 저장되었습니다');
+            } catch (e) {
+                showMessage('저장 실패: ' + (e.message || '오류 발생'), 'error');
+            }
+        }
+        
+        async function resetSubtitleRules() {
+            try {
+                await apiCall('/subtitle-rules/reset', 'POST');
+                loadSubtitleRules();
+                showMessage('자막 규칙이 기본값으로 초기화되었습니다');
+            } catch (e) {
+                showMessage('초기화 실패: ' + (e.message || '오류 발생'), 'error');
+            }
+        }
+        
+        // 초기 로드
+        loadSubtitleRules();
+        loadStats();
+        loadProfanity();
+        loadProperNouns();
+        loadGovernmentDict();
+        loadAbbreviations();
+        loadHallucination();
+        loadSensitivePatterns();
+    </script>
+</body>
+</html>

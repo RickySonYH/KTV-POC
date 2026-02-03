@@ -1,0 +1,10 @@
+# [advice from AI] KTV POC 백엔드 의존성
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+aiofiles==23.2.1
+pydantic==2.6.1
+httpx==0.26.0
+python-dotenv==1.0.1
+websockets==12.0
+yt-dlp>=2024.1.0

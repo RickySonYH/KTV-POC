@@ -1,0 +1,479 @@
+# STT-Full-Service API 가이드
+
+실시간 방송 자막용 STT(Speech-to-Text) 서비스 API 문서
+
+---
+
+## 📌 서비스 정보
+
+| 항목 | 값 |
+|------|---|
+| **서비스명** | STT-Full-Service |
+| **포트** | 6470 |
+| **프로토콜** | HTTP (REST), WebSocket |
+| **오디오 형식** | PCM (int16, mono) |
+| **지원 샘플레이트** | 16000Hz (권장), 32000Hz, 44100Hz, 48000Hz |
+
+---
+
+## 🔗 접속 정보
+
+### 엔드포인트
+
+```
+# REST API (Health Check)
+http://<HOST>:6470/api/v1/health
+
+# WebSocket (실시간 스트리밍) - 신규 API
+ws://<HOST>:6470/api/v1/stream
+
+# WebSocket (whisper-stt-server 호환) - 기존 클라이언트용 ⭐
+ws://<HOST>:6470/client/ws/speech
+
+# 관리 페이지
+http://<HOST>:6470/admin
+```
+
+### 로컬 테스트
+```
+http://localhost:6470/api/v1/health
+ws://localhost:6470/api/v1/stream
+ws://localhost:6470/client/ws/speech?model=KOREAN_16K&lang=ko
+http://localhost:6470/admin
+```
+
+---
+
+## 📡 REST API
+
+### GET /api/v1/health
+
+서버 상태 확인
+
+#### 요청
+```bash
+curl http://localhost:6470/api/v1/health
+```
+
+#### 응답
+```json
+{
+  "status": "healthy",
+  "whisper_model": "large-v3",
+  "device": "cuda",
+  "vad_loaded": true,
+  "speaker_model_loaded": true
+}
+```
+
+---
+
+## 🔄 호환 API (whisper-stt-server 호환) ⭐ 추천
+
+기존 `whisper-stt-server:6050` 클라이언트가 **포트만 변경**하면 사용 가능
+
+### 연결
+
+```
+ws://<HOST>:6470/client/ws/speech?model=KOREAN_16K&lang=ko
+```
+
+### 파라미터
+
+| 파라미터 | 기본값 | 설명 |
+|---------|--------|------|
+| `model` | `KOREAN_16K` | 모델명 (샘플레이트 결정) |
+| `lang` | `ko` | 언어 코드 |
+
+### 지원 모델
+
+| 모델 | 샘플레이트 |
+|------|-----------|
+| `KOREAN_8K` | 8,000 Hz |
+| `KOREAN_16K` | 16,000 Hz |
+| `KOREAN_32K` | 32,000 Hz |
+
+### 응답 형식 (HAIV 스타일 실시간)
+
+#### 중간 결과 (발화 감지 시마다)
+```json
+{
+    "type": "segment",
+    "text": "국무총리께서 답변해 주시기 바랍니다.",
+    "start": 0.0,
+    "end": 2.5,
+    "speaker_changed": false,
+    "segment_id": 1,
+    "final": false
+}
+```
+
+#### 최종 결과 (EOS 시)
+```json
+{
+    "type": "final",
+    "text": "전체 텍스트 (줄바꿈 포함)",
+    "segments": [...],
+    "total_duration": 5.0,
+    "total_segments": 10,
+    "final": true
+}
+```
+
+### 마이그레이션
+
+```diff
+- ws://localhost:6050/client/ws/speech?model=KOREAN_16K&lang=ko
++ ws://localhost:6470/client/ws/speech?model=KOREAN_16K&lang=ko
+```
+
+**포트만 변경!** (6050 → 6470)
+
+---
+
+## 🎙️ WebSocket API (신규 API)
+
+### 연결
+
+#### URL 형식
+```
+ws://<HOST>:6470/api/v1/stream?lang=<언어>&sample_rate=<샘플레이트>&speaker_change=<화자감지>
+```
+
+#### 파라미터
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|------|--------|------|
+| `lang` | string | ❌ | `ko` | 언어 코드 (ko, en, ja, zh 등) |
+| `sample_rate` | int | ❌ | `16000` | 오디오 샘플레이트 (Hz) |
+| `speaker_change` | bool | ❌ | `true` | 화자 변경 감지 활성화 |
+
+#### 예시
+```
+ws://localhost:6470/api/v1/stream?lang=ko&sample_rate=16000&speaker_change=true
+```
+
+---
+
+## 📤 데이터 전송 형식
+
+### 오디오 데이터 전송
+
+| 항목 | 값 |
+|------|---|
+| **형식** | Raw PCM (binary) |
+| **비트 깊이** | 16-bit signed integer (int16) |
+| **채널** | Mono (1 channel) |
+| **바이트 순서** | Little-endian |
+| **권장 청크 크기** | 4096 ~ 16000 bytes |
+
+#### 전송 흐름
+
+```
+클라이언트                           서버
+   │                                  │
+   │──── [오디오 청크 1] ────────────▶│
+   │                                  │
+   │──── [오디오 청크 2] ────────────▶│
+   │                                  │
+   │◀──── { type: "segment" } ────────│  (인식 결과)
+   │                                  │
+   │──── [오디오 청크 N] ────────────▶│
+   │                                  │
+   │──── "EOS" ──────────────────────▶│  (전송 종료 신호)
+   │                                  │
+   │◀──── { type: "final" } ──────────│  (최종 결과)
+   │                                  │
+```
+
+### 전송 종료
+
+스트리밍 종료 시 **문자열 `"EOS"`** 전송:
+
+```python
+await websocket.send("EOS")
+```
+
+---
+
+## 📥 응답 형식
+
+### 1. 세그먼트 응답 (실시간)
+
+발화 구간이 인식될 때마다 전송
+
+```json
+{
+  "type": "segment",
+  "segment_id": 1,
+  "text": "오늘 회의에서 논의할 내용은 다음과 같습니다",
+  "start_time": 1706875200.123,
+  "end_time": 1706875203.456,
+  "speaker_changed": false,
+  "speaker_id": 0,
+  "confidence": 0.92
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | string | 항상 `"segment"` |
+| `segment_id` | int | 세그먼트 순번 |
+| `text` | string | 인식된 텍스트 |
+| `start_time` | float | 시작 시간 (Unix timestamp) |
+| `end_time` | float | 종료 시간 (Unix timestamp) |
+| `speaker_changed` | bool | 화자 변경 여부 |
+| `speaker_id` | int | 화자 ID (0부터 시작) |
+| `confidence` | float | 신뢰도 (0.0 ~ 1.0) |
+
+### 2. 최종 응답
+
+`"EOS"` 수신 후 전송
+
+```json
+{
+  "type": "final",
+  "text": "[화자1] 오늘 회의에서 논의할 내용은 다음과 같습니다.\n[화자2] 네, 알겠습니다.",
+  "total_segments": 5,
+  "total_duration": 30.5,
+  "processing_time": 5.2
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `type` | string | 항상 `"final"` |
+| `text` | string | 전체 텍스트 (화자 레이블 + 줄바꿈 포함) |
+| `total_segments` | int | 총 세그먼트 수 |
+| `total_duration` | float | 오디오 총 길이 (초) |
+| `processing_time` | float | 처리 시간 (초) |
+
+### 3. 에러 응답
+
+```json
+{
+  "type": "error",
+  "message": "Invalid audio format",
+  "code": "INVALID_FORMAT"
+}
+```
+
+---
+
+## 💻 사용 예제
+
+### Python
+
+```python
+import asyncio
+import websockets
+import wave
+
+async def stream_audio(audio_file: str):
+    # WAV 파일 읽기
+    with wave.open(audio_file, 'rb') as wf:
+        sample_rate = wf.getframerate()
+        pcm_data = wf.readframes(wf.getnframes())
+    
+    # WebSocket 연결
+    uri = f"ws://localhost:6470/api/v1/stream?lang=ko&sample_rate={sample_rate}&speaker_change=true"
+    
+    async with websockets.connect(uri) as ws:
+        # 오디오 청크 전송
+        chunk_size = 8000  # 0.25초 @ 16kHz
+        for i in range(0, len(pcm_data), chunk_size):
+            await ws.send(pcm_data[i:i+chunk_size])
+            await asyncio.sleep(0.01)  # 선택적 딜레이
+        
+        # 전송 종료
+        await ws.send("EOS")
+        
+        # 결과 수신
+        while True:
+            response = await ws.recv()
+            data = json.loads(response)
+            
+            if data["type"] == "segment":
+                print(f"[{data['segment_id']}] {data['text']}")
+                if data["speaker_changed"]:
+                    print("  └─ 🔄 화자 변경 감지!")
+            
+            elif data["type"] == "final":
+                print("\n=== 최종 결과 ===")
+                print(data["text"])
+                break
+
+# 실행
+asyncio.run(stream_audio("meeting.wav"))
+```
+
+### JavaScript (브라우저)
+
+```javascript
+async function streamAudio(audioBlob, sampleRate = 16000) {
+    const ws = new WebSocket(
+        `ws://localhost:6470/api/v1/stream?lang=ko&sample_rate=${sampleRate}&speaker_change=true`
+    );
+    
+    ws.binaryType = 'arraybuffer';
+    
+    ws.onopen = async () => {
+        console.log('연결됨');
+        
+        // ArrayBuffer를 청크로 전송
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const chunkSize = 8000;
+        
+        for (let i = 0; i < arrayBuffer.byteLength; i += chunkSize) {
+            const chunk = arrayBuffer.slice(i, i + chunkSize);
+            ws.send(chunk);
+            await new Promise(r => setTimeout(r, 10));
+        }
+        
+        // 전송 종료
+        ws.send("EOS");
+    };
+    
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'segment') {
+            console.log(`[${data.segment_id}] ${data.text}`);
+        } else if (data.type === 'final') {
+            console.log('최종 결과:', data.text);
+            ws.close();
+        }
+    };
+    
+    ws.onerror = (error) => console.error('WebSocket 에러:', error);
+}
+```
+
+### cURL (Health Check)
+
+```bash
+# 서버 상태 확인
+curl -X GET http://localhost:6470/api/v1/health
+
+# 응답 예시
+# {"status":"healthy","whisper_model":"large-v3","device":"cuda","vad_loaded":true,"speaker_model_loaded":true}
+```
+
+---
+
+## 🛠️ 관리 API
+
+### 관리 페이지
+```
+http://localhost:6470/admin
+```
+
+### 사전 통계 조회
+```bash
+curl http://localhost:6470/api/v1/admin/stats
+```
+
+**응답:**
+```json
+{
+    "profanity_count": 79,
+    "sensitive_count": 18,
+    "proper_noun_count": 124,
+    "government_dict_count": 138,
+    "abbreviation_count": 120,
+    "hallucination_count": 57
+}
+```
+
+### 사전 관리 엔드포인트
+
+| 엔드포인트 | 메서드 | 설명 |
+|-----------|--------|------|
+| `/api/v1/admin/profanity` | GET/POST/DELETE | 비속어 필터 |
+| `/api/v1/admin/proper-nouns` | GET/POST/DELETE | 고유명사 사전 |
+| `/api/v1/admin/government-dict` | GET/POST/DELETE | 정부 용어 사전 |
+| `/api/v1/admin/abbreviations` | GET/POST/DELETE | 약어 사전 |
+| `/api/v1/admin/hallucination` | GET/POST/DELETE | 할루시네이션 패턴 |
+| `/api/v1/admin/sensitive-patterns` | GET | 민감정보 패턴 (읽기전용) |
+
+### 실시간 로그
+```
+ws://localhost:6470/api/v1/admin/logs
+```
+
+---
+
+## 🎵 특수 기능
+
+### 음악 감지
+
+배경음악이나 노래가 감지되면 텍스트 대신 레이블로 표시:
+
+```
+[♪]        - 배경음악
+[♪ 노래]   - 노래/가사
+```
+
+### 화자 변경 감지
+
+화자가 변경되면 텍스트에 줄바꿈 자동 삽입:
+
+```
+국무총리께서 답변해 주시기 바랍니다.
+네, 말씀드리겠습니다. 현재 경제 상황은...
+```
+
+### 후처리 (자동 적용)
+
+| 기능 | 수량 | 설명 |
+|------|------|------|
+| 비속어 마스킹 | 79개 | 방송 부적절 표현 `***` 처리 |
+| 민감정보 마스킹 | 18개 | 주민번호, 전화번호 등 |
+| 정부 용어 교정 | 138개 | 국무총니→국무총리 |
+| 고유명사 교정 | 124개 | 정치인, 정당, 기관명 |
+| 약어 변환 | 120개 | 아이엠에프→IMF |
+| 할루시네이션 필터 | 57개 | 잘못된 인식 제거 |
+
+**총 536개 사전 항목 (국회/국무회의 특화)**
+
+---
+
+## ⚠️ 주의사항
+
+1. **오디오 형식**: 반드시 PCM int16 mono 형식으로 전송
+2. **샘플레이트**: URL 파라미터와 실제 오디오 샘플레이트 일치 필요
+3. **EOS 전송**: 스트리밍 종료 시 반드시 `"EOS"` 문자열 전송
+4. **타임아웃**: WebSocket 연결 타임아웃 60초 (ping/pong 지원)
+
+---
+
+## 📊 성능 참고
+
+| 항목 | 값 |
+|------|---|
+| 실시간 비율 | 5x ~ 10x (GPU 기준) |
+| 지연 시간 | 약 2초 이내 |
+| 최대 동시 연결 | 서버 리소스에 따라 다름 |
+
+---
+
+## 🔧 문제 해결
+
+### 연결 실패
+```bash
+# 서버 상태 확인
+curl http://localhost:6470/api/v1/health
+
+# Docker 컨테이너 확인
+docker ps | grep stt-full-service
+```
+
+### 인식 결과 없음
+- 오디오 형식 확인 (PCM int16 mono)
+- 샘플레이트 파라미터 확인
+- 오디오 볼륨 확인 (너무 작으면 VAD가 무음으로 판단)
+
+### WebSocket 연결 끊김
+- ping_timeout 설정 확인
+- 네트워크 상태 확인
+- 서버 로그 확인: `docker logs stt-full-service`
