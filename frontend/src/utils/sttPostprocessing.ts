@@ -292,6 +292,10 @@ const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; descrip
   { pattern: /국민의힘의\s*의견을?\s*전해드리겠습니다?/gi, replacement: '', description: '국민의례 환각' },
   // "국민의힘을 하겠습니다" → "국민의례를 하겠습니다"
   { pattern: /국민의힘을?\s*하겠습니다/gi, replacement: '국민의례를 하겠습니다', description: '국민의례 오인식' },
+  // [advice from AI] "국민을 국민의례를" → "국민의례를" (중복 수정)
+  { pattern: /국민을\s*국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
+  // "국민 국민의례를" → "국민의례를"
+  { pattern: /국민\s+국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
 ];
 
 function applyContextCorrections(text: string): string {

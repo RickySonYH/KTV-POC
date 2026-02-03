@@ -496,6 +496,12 @@ function App() {
     const newSubtitles: SubtitleSegment[] = [];
     
     processedSentences.forEach(({ processed }, index) => {
+      // [advice from AI] ★ 5자 미만은 자막 목록에 추가하지 않음 ("먼저" 같은 짧은 텍스트 방지)
+      if (processed.length < 5) {
+        console.log(`[SUBTITLE-LIST] ⏭️ 너무 짧음: "${processed}" (${processed.length}자)`);
+        return;
+      }
+      
       // [advice from AI] ★ 최근 5개 텍스트와 비교 (강화된 중복 방지)
       if (isRecentlyAdded(processed)) {
         console.log(`[SUBTITLE-LIST] ⏭️ 중복 스킵: "${processed.substring(0, 30)}..."`);
@@ -667,6 +673,13 @@ function App() {
         const processedSentences: string[] = [];
         for (const sentence of rawSentences) {
           const processed = postprocessText(sentence, true);
+          
+          // [advice from AI] ★ 5자 미만은 스킵 ("먼저" 같은 짧은 텍스트 방지)
+          if (processed && processed.length < 5) {
+            console.log(`[BUFFER-CONFIRM] ⏭️ 너무 짧음: "${processed}" (${processed.length}자)`);
+            continue;
+          }
+          
           // [advice from AI] ★ 최근 5개 텍스트와 비교 (강화된 중복 방지)
           if (processed && !isRecentlyAdded(processed)) {
             processedSentences.push(processed);
