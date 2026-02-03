@@ -103,6 +103,10 @@ function App() {
   const [duration, setDuration] = useState(0);
   const [status, setStatus] = useState<ProcessStatus>('idle');
   
+  // [advice from AI] ★ 자막 수동 편집 기능
+  const [editingSubtitleId, setEditingSubtitleId] = useState<number | null>(null);
+  const [editText, setEditText] = useState<string>('');
+  
   // [advice from AI] ★ 유사도 기반 중복 체크 함수
   // "국민의힘"과 "국민의례"처럼 비슷한 텍스트 중복 방지
   const isSimilarText = useCallback((text1: string, text2: string, threshold = 0.6): boolean => {
@@ -1674,11 +1678,11 @@ function App() {
               </div>
             </div>
 
-            {/* [advice from AI] 3. 자막 리스트 (전체 너비, 하단) */}
+            {/* [advice from AI] 3. 자막 리스트 (전체 너비, 하단) - SRT 다운로드 + 수동 편집 기능 */}
             <div className="card" style={{ margin: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <div className="card-title" style={{ margin: 0 }}>자막 목록</div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   {isStreaming && (
                     <span style={{ 
                       fontSize: '12px', 
@@ -1701,6 +1705,38 @@ function App() {
                   <span style={{ fontSize: '13px', color: '#666' }}>
                     총 {displayedSubtitles.length}개 (캐시: {cacheCount}개)
                   </span>
+                  {/* [advice from AI] SRT 다운로드 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (displayedSubtitles.length === 0) return;
+                      const srtContent = generateSrtContent();
+                      const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      const baseName = (video?.name || youtubeTitle || 'subtitle').replace(/\.[^/.]+$/, '');
+                      link.download = `${baseName}.srt`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      URL.revokeObjectURL(url);
+                      console.log(`[APP] 📥 SRT 다운로드: ${displayedSubtitles.length}개 자막`);
+                    }}
+                    disabled={displayedSubtitles.length === 0}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      color: displayedSubtitles.length === 0 ? '#999' : '#fff',
+                      background: displayedSubtitles.length === 0 ? '#e0e0e0' : '#0073cf',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: displayedSubtitles.length === 0 ? 'not-allowed' : 'pointer',
+                      transition: 'background 0.2s'
+                    }}
+                  >
+                    SRT 다운로드
+                  </button>
                 </div>
               </div>
               
@@ -1714,60 +1750,184 @@ function App() {
                   영상을 재생하면 자막이 여기에 표시됩니다
                 </div>
               ) : (
-                <div style={{ 
-                  maxHeight: '200px', 
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}>
-                  {displayedSubtitles.map((sub) => (
-                    <div 
-                      key={sub.id}
-                      onClick={() => {
-                        // [advice from AI] 클릭 시 해당 시간으로 영상 이동
-                        const videoElement = videoPlayerRef.current?.getVideoElement();
-                        if (videoElement) {
-                          videoElement.currentTime = sub.startTime;
-                          videoElement.play();
-                          console.log(`[APP] 🎯 자막 클릭 → ${sub.startTime.toFixed(1)}초로 이동`);
-                        }
-                      }}
-                      style={{
-                        display: 'flex',
-                        gap: '12px',
-                        padding: '8px 12px',
-                        background: sub.id === latestSubtitleId ? '#e8f4fd' : '#f8f9fa',
-                        borderRadius: '6px',
-                        borderLeft: sub.id === latestSubtitleId ? '3px solid #0056b3' : '3px solid transparent',
-                        transition: 'all 0.2s',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <span style={{ 
-                        fontSize: '12px', 
-                        color: '#666',
-                        minWidth: '50px'
-                      }}>
-                        {Math.floor(sub.startTime / 60).toString().padStart(2, '0')}:
-                        {Math.floor(sub.startTime % 60).toString().padStart(2, '0')}
-                      </span>
-                      {sub.speaker && (
-                        <span style={{
-                          fontSize: '11px',
-                          background: '#0073cf',
-                          color: '#fff',
-                          padding: '2px 8px',
-                          borderRadius: '10px',
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {sub.speaker}
-                        </span>
-                      )}
-                      <span style={{ fontSize: '14px', flex: 1 }}>{sub.text}</span>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div style={{ 
+                    maxHeight: '200px', 
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    {displayedSubtitles.map((sub) => {
+                      const isEditing = editingSubtitleId === sub.id;
+                      
+                      return (
+                        <div 
+                          key={sub.id}
+                          style={{
+                            display: 'flex',
+                            gap: '12px',
+                            padding: '8px 12px',
+                            background: isEditing ? '#fff8e1' : sub.id === latestSubtitleId ? '#e8f4fd' : '#f8f9fa',
+                            borderRadius: '6px',
+                            borderLeft: isEditing ? '3px solid #ffc107' : sub.id === latestSubtitleId ? '3px solid #0056b3' : '3px solid transparent',
+                            transition: 'all 0.2s',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {/* 시간 - 클릭 시 해당 시간으로 이동 */}
+                          <span 
+                            onClick={() => {
+                              const videoElement = videoPlayerRef.current?.getVideoElement();
+                              if (videoElement) {
+                                videoElement.currentTime = sub.startTime;
+                                videoElement.play();
+                                console.log(`[APP] 🎯 자막 클릭 → ${sub.startTime.toFixed(1)}초로 이동`);
+                              }
+                            }}
+                            style={{ 
+                              fontSize: '12px', 
+                              color: '#666',
+                              minWidth: '50px',
+                              cursor: 'pointer'
+                            }}
+                            title="클릭하여 해당 시간으로 이동"
+                          >
+                            {Math.floor(sub.startTime / 60).toString().padStart(2, '0')}:
+                            {Math.floor(sub.startTime % 60).toString().padStart(2, '0')}
+                          </span>
+                          
+                          {/* 화자 */}
+                          {sub.speaker && (
+                            <span style={{
+                              fontSize: '11px',
+                              background: '#0073cf',
+                              color: '#fff',
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {sub.speaker}
+                            </span>
+                          )}
+                          
+                          {/* 텍스트 - 편집 모드 */}
+                          {isEditing ? (
+                            <div style={{ flex: 1, display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                value={editText}
+                                onChange={(e) => setEditText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    // 저장
+                                    setDisplayedSubtitles(prev => 
+                                      prev.map(s => s.id === sub.id ? { ...s, text: editText } : s)
+                                    );
+                                    setEditingSubtitleId(null);
+                                    setEditText('');
+                                    console.log(`[APP] ✏️ 자막 편집 완료: "${editText.substring(0, 20)}..."`);
+                                  } else if (e.key === 'Escape') {
+                                    // 취소
+                                    setEditingSubtitleId(null);
+                                    setEditText('');
+                                  }
+                                }}
+                                autoFocus
+                                style={{
+                                  flex: 1,
+                                  padding: '4px 8px',
+                                  fontSize: '14px',
+                                  border: '2px solid #ffc107',
+                                  borderRadius: '4px',
+                                  outline: 'none'
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  setDisplayedSubtitles(prev => 
+                                    prev.map(s => s.id === sub.id ? { ...s, text: editText } : s)
+                                  );
+                                  setEditingSubtitleId(null);
+                                  setEditText('');
+                                }}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  color: '#fff',
+                                  background: '#28a745',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                저장
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingSubtitleId(null);
+                                  setEditText('');
+                                }}
+                                style={{
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  color: '#666',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                취소
+                              </button>
+                            </div>
+                          ) : (
+                            /* 텍스트 - 일반 모드 (더블클릭으로 편집) */
+                            <span 
+                              onDoubleClick={() => {
+                                setEditingSubtitleId(sub.id);
+                                setEditText(sub.text);
+                              }}
+                              style={{ 
+                                fontSize: '14px', 
+                                flex: 1,
+                                cursor: 'text',
+                                padding: '2px 4px',
+                                borderRadius: '4px'
+                              }}
+                              title="더블클릭하여 편집"
+                            >
+                              {sub.text}
+                            </span>
+                          )}
+                          
+                          {/* NEW 표시 */}
+                          {sub.id === latestSubtitleId && !isEditing && (
+                            <span style={{
+                              fontSize: '9px',
+                              color: '#fff',
+                              background: '#dc3545',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              fontWeight: 'bold'
+                            }}>
+                              NEW
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* [advice from AI] 편집 안내 */}
+                  <div style={{ 
+                    marginTop: '8px', 
+                    fontSize: '11px', 
+                    color: '#888',
+                    textAlign: 'right'
+                  }}>
+                    💡 자막을 더블클릭하면 직접 편집할 수 있습니다
+                  </div>
+                </>
               )}
             </div>
 
