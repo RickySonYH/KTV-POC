@@ -282,7 +282,7 @@ function App() {
   const bufferTimeoutRef = useRef<number | null>(null);
   const lastBufferForListRef = useRef<string>('');  // 자막 목록용 버퍼
   const bufferStartTimeRef = useRef<number>(0);     // 버퍼 시작 시간
-  const BUFFER_CONFIRM_TIMEOUT = 3000;              // 3초
+  const BUFFER_CONFIRM_TIMEOUT = 5000;              // [advice from AI] 5초로 늘려서 WhisperLiveKit이 수정할 시간 확보
 
   // [advice from AI] 문장을 자막 목록에 추가하는 함수
   const addSentenceToList = useCallback((text: string, speaker?: string) => {
