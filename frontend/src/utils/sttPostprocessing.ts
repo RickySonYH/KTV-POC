@@ -301,6 +301,8 @@ const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; descrip
   // [advice from AI] ★ 추가 오인식 패턴 (로그 분석 기반)
   // "먼저 국민들에게 전해드리겠습니다" → "먼저 국민의례를 하겠습니다"
   { pattern: /먼저\s*국민들에게\s*전해드리겠습니다/gi, replacement: '먼저 국민의례를 하겠습니다', description: '국민의례 오인식2' },
+  // [advice from AI] ★ 롤백: "공략을" 패턴은 너무 일반적 → 오탐 가능성 높음
+  // 대신 관리페이지의 "정부 용어 사전"에서 영상별로 동적 관리 권장
   // "국민을 국민의뢰를" → "국민의례를" (의뢰 오인식)
   { pattern: /국민을?\s*국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰 오인식' },
   // "이는 성장과 이는 성장의" → "이는 성장의" (반복)
