@@ -1,6 +1,7 @@
-// [advice from AI] 동영상 플레이어 - 실시간 캡션 오버레이
+// [advice from AI] 동영상 플레이어 - 실시간 캡션 오버레이 + HLS 지원
 
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import Hls from 'hls.js';
 import type { VideoFile } from '../types/subtitle';
 
 // [advice from AI] 3줄 자막 타입
@@ -41,6 +42,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   isProcessing
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPlayButton, setShowPlayButton] = useState(true);
   
@@ -56,6 +58,69 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       setShowPlayButton(false);
     }
   };
+
+  // [advice from AI] ★★★ HLS 스트리밍 지원 ★★★
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    const url = videoUrl || video?.url;
+    
+    if (!videoElement || !url) return;
+    
+    // 이전 HLS 인스턴스 정리
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    
+    // HLS URL 감지 (.m3u8)
+    const isHlsUrl = url.includes('.m3u8') || url.includes('m3u8');
+    
+    if (isHlsUrl && Hls.isSupported()) {
+      console.log('[VIDEO] 🎬 HLS 스트리밍 감지 → hls.js 사용');
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,  // [advice from AI] 저지연 모드
+        backBufferLength: 90,
+      });
+      
+      hls.loadSource(url);
+      hls.attachMedia(videoElement);
+      
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('[VIDEO] ✅ HLS 매니페스트 로드 완료');
+      });
+      
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          console.error('[VIDEO] ❌ HLS 치명적 오류:', data.type, data.details);
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            console.log('[VIDEO] 🔄 네트워크 오류 → 복구 시도...');
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            console.log('[VIDEO] 🔄 미디어 오류 → 복구 시도...');
+            hls.recoverMediaError();
+          }
+        }
+      });
+      
+      hlsRef.current = hls;
+    } else if (isHlsUrl && videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari 네이티브 HLS 지원
+      console.log('[VIDEO] 🎬 Safari 네이티브 HLS 사용');
+      videoElement.src = url;
+    } else {
+      // 일반 비디오
+      console.log('[VIDEO] 🎬 일반 비디오 소스 설정');
+      videoElement.src = url;
+    }
+    
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [video?.url, videoUrl]);
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -97,10 +162,10 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   return (
     <div className="card" style={{ margin: 0 }}>
       <div className="video-container" style={{ position: 'relative' }}>
+        {/* [advice from AI] HLS는 hls.js가 src 관리, 일반 비디오는 useEffect에서 설정 */}
         <video
           ref={videoRef}
           className="video-player"
-          src={videoUrl || video?.url}
           controls
           crossOrigin="anonymous"
           style={{ width: '100%', maxHeight: '600px', display: 'block', background: '#000', borderRadius: '8px' }}
@@ -215,18 +280,18 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                     transform: liveSubtitleLines && liveSubtitleLines[0] ? 'translateY(0)' : 'translateY(10px)',
                     minHeight: '32px'
                   }}>
-                    <span style={{
-                      color: '#fff',
-                      fontSize: '24px',
-                      fontWeight: '600',
+                      <span style={{
+                        color: '#fff',
+                        fontSize: '24px',
+                        fontWeight: '600',
                       lineHeight: '1.5',
-                      letterSpacing: '0.5px',
+                        letterSpacing: '0.5px',
                       textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
                       transition: 'all 0.3s ease-out'
-                    }}>
+                      }}>
                       {liveSubtitleLines && liveSubtitleLines[0] ? liveSubtitleLines[0] : ''}
-                    </span>
-                  </div>
+                      </span>
+                    </div>
                   {/* [advice from AI] 하단 - 현재 채워지는 텍스트 */}
                   <div style={{
                     transition: 'all 0.3s ease-out',

@@ -555,3 +555,107 @@ async def clear_stt_log():
         return {"status": "cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# [advice from AI] ★★★ WhisperLiveKit (STT) 관리 API ★★★
+# =============================================================================
+
+import subprocess
+import httpx
+
+# WhisperLiveKit 컨테이너 이름 및 내부 URL
+WHISPER_CONTAINER_NAME = "ktv-whisper-livekit"
+WHISPER_INTERNAL_URL = "http://whisper-livekit:8000"
+
+@router.get("/whisper/health")
+async def whisper_health_check():
+    """
+    WhisperLiveKit 서버 헬스체크
+    - 컨테이너 상태 확인
+    - WebSocket 서버 응답 확인
+    """
+    result = {
+        "container_running": False,
+        "server_responding": False,
+        "status": "unknown",
+        "message": ""
+    }
+    
+    # 1. 컨테이너 상태 확인
+    try:
+        container_check = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", WHISPER_CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if container_check.returncode == 0 and container_check.stdout.strip() == "true":
+            result["container_running"] = True
+        else:
+            result["status"] = "stopped"
+            result["message"] = "WhisperLiveKit 컨테이너가 중지됨"
+            return result
+    except subprocess.TimeoutExpired:
+        result["status"] = "error"
+        result["message"] = "Docker 명령 타임아웃"
+        return result
+    except Exception as e:
+        result["status"] = "error"
+        result["message"] = f"Docker 확인 실패: {str(e)}"
+        return result
+    
+    # 2. HTTP 응답 확인 (WebSocket 서버의 HTTP 핸들러)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(WHISPER_INTERNAL_URL)
+            if response.status_code == 200:
+                result["server_responding"] = True
+                result["status"] = "healthy"
+                result["message"] = "WhisperLiveKit 정상 작동 중"
+            else:
+                result["status"] = "degraded"
+                result["message"] = f"HTTP 응답 코드: {response.status_code}"
+    except httpx.TimeoutException:
+        result["status"] = "degraded"
+        result["message"] = "서버 응답 타임아웃 (컨테이너는 실행 중)"
+    except Exception as e:
+        result["status"] = "degraded"
+        result["message"] = f"연결 실패: {str(e)}"
+    
+    return result
+
+@router.post("/whisper/restart")
+async def restart_whisper():
+    """
+    WhisperLiveKit 서버 재시작
+    - Docker 컨테이너 재시작
+    """
+    logger.info("[ADMIN] WhisperLiveKit 재시작 요청")
+    
+    try:
+        # Docker 컨테이너 재시작
+        restart_cmd = subprocess.run(
+            ["docker", "restart", WHISPER_CONTAINER_NAME],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if restart_cmd.returncode == 0:
+            logger.info("[ADMIN] WhisperLiveKit 재시작 완료")
+            return {
+                "status": "success",
+                "message": "WhisperLiveKit 재시작 완료",
+                "container": WHISPER_CONTAINER_NAME
+            }
+        else:
+            logger.error(f"[ADMIN] 재시작 실패: {restart_cmd.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"재시작 실패: {restart_cmd.stderr}"
+            )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="재시작 타임아웃 (30초 초과)")
+    except Exception as e:
+        logger.error(f"[ADMIN] 재시작 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

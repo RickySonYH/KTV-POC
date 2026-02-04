@@ -273,8 +273,9 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
         
         // 무음 청크 카운터 (연속 무음 감지)
         let silentChunkCount = 0;
-        const SILENCE_THRESHOLD = 0.005;  // RMS 임계값
-        const MAX_SILENT_CHUNKS = 10;     // 연속 무음 허용 개수
+        // [advice from AI] ★ 무음 임계값 상향: 0.005 → 0.02 (노이즈 전송 방지 → 할루시네이션 감소)
+        const SILENCE_THRESHOLD = 0.02;  // RMS 임계값 (0.02 = 약 -34dB)
+        const MAX_SILENT_CHUNKS = 5;     // 연속 무음 허용 개수 (10 → 5로 축소)
         
         processor.onaudioprocess = (e) => {
           if (ws.readyState !== WebSocket.OPEN) return;

@@ -3,6 +3,27 @@
 
 import { useRef, useCallback, useState } from 'react';
 
+// [advice from AI] 동적 URL 생성 - 원격지 접속 지원
+const getSpeakerWsUrl = () => {
+  if (window.location.protocol === 'https:') {
+    return `wss://${window.location.host}/api/speaker/ws`;
+  }
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'ws://localhost:6450/api/speaker/ws';
+  }
+  return `ws://${window.location.hostname}:6450/api/speaker/ws`;
+};
+
+const getSpeakerApiUrl = () => {
+  if (window.location.protocol === 'https:') {
+    return '';  // 상대 경로 사용
+  }
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:6450';
+  }
+  return `http://${window.location.hostname}:6450`;
+};
+
 interface SpeakerDetectionOptions {
   onSpeakerChange?: (speaker: number) => void;
   analyzeInterval?: number;  // 분석 간격 (ms)
@@ -24,7 +45,7 @@ export function useSpeakerDetection(options: SpeakerDetectionOptions = {}) {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     
-    const wsUrl = `ws://localhost:6450/api/speaker/ws`;
+    const wsUrl = getSpeakerWsUrl();
     console.log('[SPEAKER-WS] 연결 시도:', wsUrl);
     
     const ws = new WebSocket(wsUrl);
@@ -122,7 +143,7 @@ export function useSpeakerDetection(options: SpeakerDetectionOptions = {}) {
   // 상태 리셋
   const reset = useCallback(async () => {
     try {
-      await fetch('http://localhost:6450/api/speaker/reset', { method: 'POST' });
+      await fetch(`${getSpeakerApiUrl()}/api/speaker/reset`, { method: 'POST' });
       setCurrentSpeaker(0);
       audioBufferRef.current = [];
       console.log('[SPEAKER] 상태 리셋됨');

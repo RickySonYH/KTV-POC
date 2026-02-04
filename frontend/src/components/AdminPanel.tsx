@@ -49,10 +49,10 @@ interface Stats {
   hallucination_count: number;
 }
 
-type TabType = 'subtitle-rules' | 'profanity' | 'proper-nouns' | 'government-dict' | 'abbreviations' | 'hallucination' | 'sensitive-patterns';
+type TabType = 'profanity' | 'proper-nouns' | 'government-dict' | 'abbreviations' | 'hallucination' | 'sensitive-patterns';
 
 export default function AdminPanel() {
-  const [activeTab, setActiveTab] = useState<TabType>('subtitle-rules');
+  const [activeTab, setActiveTab] = useState<TabType>('profanity');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   
@@ -468,7 +468,6 @@ export default function AdminPanel() {
   };
 
   const tabs: { id: TabType; label: string }[] = [
-    { id: 'subtitle-rules', label: '자막 규칙' },
     { id: 'profanity', label: '비속어 필터' },
     { id: 'proper-nouns', label: '고유명사' },
     { id: 'government-dict', label: '정부 용어' },
@@ -531,95 +530,6 @@ export default function AdminPanel() {
       {/* 메시지 */}
       {message && (
         <div style={styles.message(message.type)}>{message.text}</div>
-      )}
-
-      {/* 자막 규칙 탭 */}
-      {activeTab === 'subtitle-rules' && (
-        <div>
-          <p style={styles.description}>실시간 자막 표시 규칙을 설정합니다. 변경사항은 즉시 프론트엔드에 적용됩니다.</p>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-            <div style={styles.ruleCard}>
-              <label style={styles.ruleLabel}>자막 줄 수</label>
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={subtitleRules.max_lines}
-                onChange={e => setSubtitleRules({ ...subtitleRules, max_lines: parseInt(e.target.value) || 2 })}
-                style={styles.ruleInput}
-              />
-              <p style={styles.ruleHint}>화면에 표시할 자막 줄 수 (1~5)</p>
-            </div>
-
-            <div style={styles.ruleCard}>
-              <label style={styles.ruleLabel}>한 줄당 최대 글자 수</label>
-              <input
-                type="number"
-                min={10}
-                max={50}
-                value={subtitleRules.max_chars_per_line}
-                onChange={e => setSubtitleRules({ ...subtitleRules, max_chars_per_line: parseInt(e.target.value) || 18 })}
-                style={styles.ruleInput}
-              />
-              <p style={styles.ruleHint}>한 줄에 표시할 최대 글자 수 (10~50)</p>
-            </div>
-
-            <div style={styles.ruleCard}>
-              <label style={styles.ruleLabel}>묵음 시 페이드아웃 (ms)</label>
-              <input
-                type="number"
-                min={1000}
-                max={10000}
-                step={500}
-                value={subtitleRules.fade_timeout_ms}
-                onChange={e => setSubtitleRules({ ...subtitleRules, fade_timeout_ms: parseInt(e.target.value) || 3000 })}
-                style={styles.ruleInput}
-              />
-              <p style={styles.ruleHint}>묵음 후 자막 유지 시간 (기본 5초)</p>
-            </div>
-
-            {/* [advice from AI] 후처리 ON/OFF 토글 */}
-            <div style={{ ...styles.ruleCard, background: subtitleRules.postprocess_enabled ? '#e8f5e9' : '#fff3e0' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={subtitleRules.postprocess_enabled}
-                  onChange={e => setSubtitleRules({ ...subtitleRules, postprocess_enabled: e.target.checked })}
-                  style={{ width: '18px', height: '18px', accentColor: subtitleRules.postprocess_enabled ? '#4caf50' : '#ff9800' }}
-                />
-                <span style={{ fontWeight: 600, color: subtitleRules.postprocess_enabled ? '#2e7d32' : '#e65100' }}>
-                  후처리 {subtitleRules.postprocess_enabled ? 'ON' : 'OFF'}
-                </span>
-              </label>
-              <p style={styles.ruleHint}>
-                {subtitleRules.postprocess_enabled 
-                  ? '✅ 고유명사, 비속어 필터, 오인식 수정 등 모든 후처리 적용'
-                  : '⚠️ WhisperLiveKit 원본 그대로 표시 (디버깅/비교용)'}
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button style={styles.btnPrimary} onClick={saveSubtitleRules}>저장</button>
-            <button 
-              style={{ ...styles.btnPrimary, background: colors.bgSecondary, color: colors.textPrimary }} 
-              onClick={resetSubtitleRules}
-            >
-              기본값으로 초기화
-            </button>
-          </div>
-
-          <div style={{ ...styles.ruleCard, marginTop: '1.5rem' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>자막 표시 방식</h3>
-            <ul style={{ fontSize: '0.85rem', color: colors.textSecondary, marginLeft: '1.5rem' }}>
-              <li>아랫줄부터 채워지고, 꽉 차면 윗줄로 이동</li>
-              <li>문장이 끝나면 (마침표 등) 즉시 줄바꿈</li>
-              <li>묵음이 지속되면 페이드아웃으로 정리</li>
-              <li>후처리 규칙 변경 시 이미 표시된 자막도 교체 가능</li>
-            </ul>
-          </div>
-        </div>
       )}
 
       {/* 비속어 필터 탭 */}

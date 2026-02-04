@@ -57,44 +57,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<'subtitle' | 'whisper' | 'guide'>('subtitle');
   
   const [video, setVideo] = useState<VideoFile | null>(null);
-  // [advice from AI] useRef로 캐시 관리 - React state 클로저 이슈 해결 + FIFO
-  const subtitleCacheRef = useRef<SubtitleSegment[]>([]);
-  const [cacheCount, setCacheCount] = useState(0);  // 캐시 개수 표시용
-  const MAX_CACHE_SIZE = 1000;  // FIFO 최대 캐시 크기
-  
-  // [advice from AI] 캐시 함수를 ref로 감싸서 클로저 문제 해결
-  const addToCacheRef = useRef<(subtitle: SubtitleSegment) => void>(() => {});
-  const clearCacheRef = useRef<() => void>(() => {});
-  
-  // [advice from AI] FIFO 캐시 추가 함수 - 직접 ref 조작
-  addToCacheRef.current = (subtitle: SubtitleSegment) => {
-    const cache = subtitleCacheRef.current;
-    console.log(`[CACHE] ➕ 추가 전: ${cache.length}개, 새 자막: [${subtitle.startTime.toFixed(1)}s] ${subtitle.text.substring(0, 20)}...`);
-    if (cache.length >= MAX_CACHE_SIZE) {
-      subtitleCacheRef.current = [...cache.slice(cache.length - MAX_CACHE_SIZE + 1), subtitle];
-    } else {
-      subtitleCacheRef.current = [...cache, subtitle];
-    }
-    console.log(`[CACHE] ✅ 추가 후: ${subtitleCacheRef.current.length}개`);
-    setCacheCount(subtitleCacheRef.current.length);
-  };
-  
-  // [advice from AI] 캐시 초기화 함수
-  clearCacheRef.current = () => {
-    subtitleCacheRef.current = [];
-    setCacheCount(0);
-  };
-  
-  // [advice from AI] 안정적인 래퍼 함수 (콜백에서 사용)
-  const addToCache = useCallback((subtitle: SubtitleSegment) => {
-    addToCacheRef.current(subtitle);
-  }, []);
-  
-  const clearCache = useCallback(() => {
-    clearCacheRef.current();
-  }, []);
-  
-  const [displayedSubtitles, setDisplayedSubtitles] = useState<SubtitleSegment[]>([]);  // 목록: 화면에 표시된 자막만
+  // [advice from AI] 자막 목록 - 기록 로직 제거됨, UI용으로만 유지
+  const [displayedSubtitles, setDisplayedSubtitles] = useState<SubtitleSegment[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [status, setStatus] = useState<ProcessStatus>('idle');
@@ -337,37 +301,9 @@ function App() {
   const bufferStartTimeRef = useRef<number>(0);     // 버퍼 시작 시간
   const BUFFER_CONFIRM_TIMEOUT = 5000;              // [advice from AI] 5초로 늘려서 WhisperLiveKit이 수정할 시간 확보
 
-  // [advice from AI] 문장을 자막 목록에 추가하는 함수 (향후 사용 예정)
-  const _addSentenceToList = useCallback((text: string, speaker?: string) => {
-    const trimmedText = text.trim();
-    if (!trimmedText) return;
-    
-    // 중복 방지: 같은 텍스트가 이미 추가되었으면 스킵
-    if (trimmedText === lastAddedTextRef.current) {
-      console.log(`[SUBTITLE-LIST] ⏭️ 중복 스킵: "${trimmedText.substring(0, 20)}..."`);
-      return;
-    }
-    
-    const endTime = currentTimeRef.current;
-    const startTime = sentenceStartTimeRef.current || Math.max(0, endTime - 3);
-    
-    segmentIdRef.current += 1;
-    const newSubtitle: SubtitleSegment = {
-      id: segmentIdRef.current,
-      startTime: startTime,
-      endTime: endTime,
-      text: trimmedText,
-      speaker: speaker
-    };
-    
-    console.log(`[SUBTITLE-LIST] ✅ 추가: [${startTime.toFixed(1)}s~${endTime.toFixed(1)}s] "${trimmedText}"`);
-    setDisplayedSubtitles(prev => [...prev, newSubtitle]);
-    displayedIdsRef.current.add(segmentIdRef.current);
-    setLatestSubtitleId(segmentIdRef.current);
-    
-    lastAddedTextRef.current = trimmedText;
-    sentenceStartTimeRef.current = endTime;  // 다음 문장 시작 시간
-    currentSentenceRef.current = '';  // 문장 리셋
+  // [advice from AI] 자막 목록 추가 함수 - 기록 로직 제거됨
+  const _addSentenceToList = useCallback((_text: string, _speaker?: string) => {
+    // 자막 목록 기록 로직 제거됨
   }, []);
 
   // [advice from AI] 화면용 연속 텍스트 ref (handleBufferUpdate보다 먼저 선언)
@@ -529,13 +465,7 @@ function App() {
       addToRecentTexts(processed);  // [advice from AI] ★ 최근 목록에 추가
     });
     
-    // Step 5: 상태 업데이트
-    if (newSubtitles.length > 0) {
-      setDisplayedSubtitles(prev => [...prev, ...newSubtitles]);
-      setLatestSubtitleId(segmentIdRef.current);
-      // [advice from AI] 자막 목록에 추가된 개수만 간단히 로그
-      console.log(`[SUBTITLE-LIST] ✅ ${newSubtitles.length}개 추가됨`);
-    }
+    // [advice from AI] 자막 목록 기록 로직 제거됨
     
     currentSentenceRef.current = '';
   }, [isRecentlyAdded, addToRecentTexts]);
@@ -599,24 +529,9 @@ function App() {
     // 화면 업데이트
     setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
     
-    // 자막 목록에 추가
-    const videoStartTime = currentTimeRef.current - parseTimeString(endTimeStr);
-    const startTime = videoStartTime + parseTimeString(startTimeStr);
-    const endTime = videoStartTime + parseTimeString(endTimeStr);
-    
-    segmentIdRef.current += 1;
-    const subtitle: SubtitleSegment = {
-      id: segmentIdRef.current,
-      startTime: Math.max(0, startTime),
-      endTime: Math.max(0, endTime),
-      text: finalText,
-      speaker: lineSpeaker >= 0 ? `화자${lineSpeaker + 1}` : undefined,
-    };
-    
-    addToCache(subtitle);
-    setDisplayedSubtitles(prev => [...prev, subtitle]);
+    // [advice from AI] 자막 목록/캐시 기록 로직 제거됨
     addToRecentTexts(finalText);
-  }, [subtitleRules.postprocess_enabled, addToCache, addToRecentTexts]);
+  }, [subtitleRules.postprocess_enabled, addToRecentTexts]);
   
   // [advice from AI] 강제 졸업 (버퍼가 20자 넘을 때)
   const forceGraduateFromBuffer = useCallback((text: string) => {
@@ -636,26 +551,12 @@ function App() {
     // 화면 업데이트 (수집줄은 나중에 설정)
     setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
     
-    // 자막 목록에 추가
-    const endTime = currentTimeRef.current;
-    const startTime = collectorStartTimeRef.current || Math.max(0, endTime - 3);
-    
-    segmentIdRef.current += 1;
-    const subtitle: SubtitleSegment = {
-      id: segmentIdRef.current,
-      startTime,
-      endTime,
-      text: processed,
-      speaker: lastGraduatedSpeakerRef.current >= 0 ? `화자${lastGraduatedSpeakerRef.current + 1}` : undefined,
-    };
-    
-    addToCache(subtitle);
-    setDisplayedSubtitles(prev => [...prev, subtitle]);
+    // [advice from AI] 자막 목록/캐시 기록 로직 제거됨
     addToRecentTexts(processed);
     
     // 수집줄 시작 시간 갱신
-    collectorStartTimeRef.current = endTime;
-  }, [subtitleRules.postprocess_enabled, addToCache, addToRecentTexts]);
+    collectorStartTimeRef.current = currentTimeRef.current;
+  }, [subtitleRules.postprocess_enabled, addToRecentTexts]);
   
   // [advice from AI] 묵음 타이머 리셋
   const resetSilenceTimer = useCallback(() => {
@@ -789,20 +690,11 @@ function App() {
           const startTime = videoStartTime + parseTimeString(newLine.start);
           const endTime = videoStartTime + parseTimeString(newLine.end);
           
-          segmentIdRef.current += 1;
-          const subtitle: SubtitleSegment = {
-            id: segmentIdRef.current,
-            startTime: Math.max(0, startTime),
-            endTime: Math.max(0, endTime),
-            text: finalText,
-            speaker: newLine.speaker >= 0 ? `화자${newLine.speaker + 1}` : undefined,
-          };
-          
-          addToCache(subtitle);
-          setDisplayedSubtitles(prev => [...prev, subtitle]);
+          // [advice from AI] 자막 목록/캐시 기록 로직 제거됨
           addToRecentTexts(finalText);
           
-          console.log(`[자막목록] ➕ "${finalText.substring(0, 30)}..." [${startTime.toFixed(1)}s~${endTime.toFixed(1)}s]`);
+          console.log(`[자막] ✅ "${finalText.substring(0, 30)}..."`);
+          segmentIdRef.current += 1;
         }
         
         addedToListIndexRef.current = newIdx;
@@ -840,7 +732,7 @@ function App() {
     // 이전 lines 저장
     lastLinesRef.current = lines.map(l => ({...l}));
     lastSegmentLinesCountRef.current = lines.length;
-  }, [subtitleRules.postprocess_enabled, resetSilenceTimer, addToCache, addToRecentTexts]);
+  }, [subtitleRules.postprocess_enabled, resetSilenceTimer, addToRecentTexts]);
 
   // [advice from AI] 비디오 오디오 직접 캡처 → WhisperLiveKit 실시간 STT
   const { 
@@ -904,8 +796,7 @@ function App() {
   // [advice from AI] 파일 선택
   const handleFileSelect = useCallback((selectedVideo: VideoFile) => {
     setVideo(selectedVideo);
-    clearCache();
-    setDisplayedSubtitles([]);
+    // [advice from AI] 캐시/목록 초기화 로직 제거됨
     displayedIdsRef.current.clear();
     resetSubtitleRefs();  // 자막 ref 초기화
     setStatus('idle');
@@ -976,8 +867,7 @@ function App() {
     setIsLiveStreamMode(true);
     setIsYoutubeMode(true);  // [advice from AI] 비디오 플레이어 표시를 위해 추가!
     setStatus('processing');
-    clearCache();
-    setDisplayedSubtitles([]);
+    // [advice from AI] 캐시/목록 초기화 로직 제거됨
     displayedIdsRef.current.clear();
     resetSubtitleRefs();  // 자막 ref 초기화
     segmentIdRef.current = Date.now();
@@ -1065,8 +955,7 @@ function App() {
                 // [advice from AI] 실시간 모드: 즉시 전체 텍스트 표시!
                 setCurrentSpeaker(liveSubData.speaker || null);
                 
-                // 2. 목록에 바로 추가!
-                setDisplayedSubtitles(prev => [...prev, liveSubtitle]);
+                // [advice from AI] 자막 목록 추가 로직 제거됨
                 setLatestSubtitleId(liveId);
                 
                 console.log(`[STREAM] 🎤 실시간 자막: [${livePlayTime.toFixed(1)}s] ${liveSubData.text.substring(0, 30)}...`);
@@ -1151,8 +1040,7 @@ function App() {
     
     setIsYoutubeMode(true);
     setStatus('processing');
-    clearCache();
-    setDisplayedSubtitles([]);
+    // [advice from AI] 캐시/목록 초기화 로직 제거됨
     displayedIdsRef.current.clear();
     resetSubtitleRefs();  // 자막 ref 초기화
     segmentIdRef.current = Date.now();
@@ -1245,9 +1133,6 @@ function App() {
       eventSourceRef.current = null;
     }
     
-    // 캐시 비우기
-    clearCache();
-    
     // 상태 변경
     setStatus('completed');
     setIsStreaming(false);
@@ -1289,48 +1174,11 @@ function App() {
   const lastCaptionTimeRef = useRef<number>(0);
   const lastLogTimeRef = useRef<number>(0);  // 로그 출력용
   
+  // [advice from AI] 캐시 기반 시간 매칭 로직 제거됨
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time);
     currentTimeRef.current = time;
-    
-    // [advice from AI] 실시간 스트리밍 모드에서는 캐시 로직 스킵!
-    if (isLiveStreamMode) {
-      return;
-    }
-    
-    // [advice from AI] 디버깅: 캐시 상태 확인 (10초마다)
-    if (Math.floor(time) % 10 === 0 && Math.floor(time) !== Math.floor(lastLogTimeRef.current)) {
-      lastLogTimeRef.current = time;
-      console.log(`[APP] 🔍 캐시: ${subtitleCacheRef.current.length}개, 표시: ${displayedSubtitles.length}개, 시간: ${time.toFixed(1)}s`);
-    }
-    
-    // [advice from AI] WhisperLiveKit은 즉시 표시하므로 캐시 기반 매칭은 사용하지 않음
-    if (sttEngine === 'whisper') {
-      return;  // Whisper는 addSubtitleLine으로 이미 표시됨
-    }
-    
-    // [advice from AI] 캐시 기반 시간 매칭 (YouTube/스트리밍용)
-    // 조건: startTime <= 현재시간 (시작 시간이 지난 모든 미표시 자막)
-    // 이렇게 하면 timeupdate 간격이 길어도 자막을 놓치지 않음
-    const pendingSubtitles = subtitleCacheRef.current.filter(
-      sub => sub.startTime <= time && !displayedIdsRef.current.has(sub.id)
-    ).sort((a, b) => a.startTime - b.startTime);  // 시간순 정렬
-    
-    // [advice from AI] 누락된 자막이 있으면 모두 표시
-    for (const subtitle of pendingSubtitles) {
-      displayedIdsRef.current.add(subtitle.id);
-      setDisplayedSubtitles(prev => [...prev, subtitle]);
-      setLatestSubtitleId(subtitle.id);
-      lastCaptionTimeRef.current = time;
-      
-      // 🎬 2줄 자막 시스템으로 즉시 표시
-      addSubtitleLine(subtitle.text, subtitle.speaker);
-      setCurrentSpeaker(subtitle.speaker || null);
-      console.log(`[APP] 📝 표시: [${subtitle.startTime.toFixed(1)}s~${subtitle.endTime.toFixed(1)}s] ${subtitle.text.substring(0, 30)}...`);
-    }
-    
-    // [advice from AI] 스킵 기능 제거됨 - 사용자 요청
-  }, [sttEngine, isLiveStreamMode, addSubtitleLine]);
+  }, []);
 
   const handleDurationChange = useCallback((videoDuration: number) => {
     setDuration(videoDuration);
@@ -1351,8 +1199,7 @@ function App() {
       URL.revokeObjectURL(video.url);
     }
     setVideo(null);
-    clearCache();
-    setDisplayedSubtitles([]);
+    // [advice from AI] 캐시/목록 초기화 로직 제거됨
     displayedIdsRef.current.clear();
     resetSubtitleRefs();  // 자막 ref 초기화
     setCurrentTime(0);
@@ -1426,7 +1273,7 @@ function App() {
 
   return (
     <div className="app">
-      <Header activeTab={activeTab} onTabChange={setActiveTab} />
+      <Header />
       
       <main className="main-content">
       
@@ -1901,7 +1748,7 @@ function App() {
                     </span>
                   )}
                   <span style={{ fontSize: '13px', color: '#666' }}>
-                    총 {displayedSubtitles.length}개 (캐시: {cacheCount}개)
+                    총 {displayedSubtitles.length}개
                   </span>
                   {/* [advice from AI] SRT 다운로드 버튼 */}
                   <button

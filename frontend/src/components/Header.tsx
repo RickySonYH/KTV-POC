@@ -1,18 +1,6 @@
-// [advice from AI] KTV 스타일 헤더 컴포넌트 - 탭 네비게이션 지원 (WhisperLiveKit 전용)
+// [advice from AI] KTV 스타일 헤더 컴포넌트 - 메인 페이지용 (관리페이지 탭 제거됨)
 
-interface HeaderProps {
-  activeTab?: 'subtitle' | 'whisper' | 'guide';
-  onTabChange?: (tab: 'subtitle' | 'whisper' | 'guide') => void;
-}
-
-const Header = ({ activeTab = 'subtitle', onTabChange }: HeaderProps) => {
-  const handleTabClick = (tab: 'subtitle' | 'whisper' | 'guide', e: React.MouseEvent) => {
-    e.preventDefault();
-    if (onTabChange) {
-      onTabChange(tab);
-    }
-  };
-
+const Header = () => {
   return (
     <header className="header">
       <div className="header-top">
@@ -22,35 +10,12 @@ const Header = ({ activeTab = 'subtitle', onTabChange }: HeaderProps) => {
         </div>
       </div>
       <div className="header-main">
-        <a href="/" className="logo" onClick={(e) => handleTabClick('subtitle', e)}>
+        <a href="/" className="logo">
           <div className="logo-icon">KTV</div>
           <div className="logo-text">
             <span>KTV</span> AI 자막 시스템
           </div>
         </a>
-        <nav className="nav-menu">
-          <a 
-            href="#" 
-            className={`nav-item ${activeTab === 'subtitle' ? 'active' : ''}`}
-            onClick={(e) => handleTabClick('subtitle', e)}
-          >
-            자막 생성
-          </a>
-          <a 
-            href="#" 
-            className={`nav-item ${activeTab === 'whisper' ? 'active' : ''}`}
-            onClick={(e) => handleTabClick('whisper', e)}
-          >
-            관리페이지
-          </a>
-          <a 
-            href="#" 
-            className={`nav-item ${activeTab === 'guide' ? 'active' : ''}`}
-            onClick={(e) => handleTabClick('guide', e)}
-          >
-            사용 가이드
-          </a>
-        </nav>
       </div>
     </header>
   );
