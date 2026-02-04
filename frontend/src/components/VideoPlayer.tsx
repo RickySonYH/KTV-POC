@@ -145,7 +145,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         {/* [advice from AI] liveSubtitleLines: 상단[0], 중간[1], 수집창[2] - 30자씩 누적 표시 */}
         {/* [advice from AI] ★ [2]도 체크해야 수집창만 있을 때도 컨테이너 표시됨! */}
         {/* [advice from AI] ★★★ 자막창 위치: 화면 중앙, 30자 고정 너비, 텍스트 좌측 정렬 ★★★ */}
-        {(subtitleLines.length > 0 || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1] || liveSubtitleLines[2]))) && (
+        {(subtitleLines.length > 0 || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]))) && (
           <div style={{
             position: 'absolute',
             bottom: '60px',
@@ -198,63 +198,52 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                     </span>
                   </div>
                 ))
-              ) : (isProcessing || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1] || liveSubtitleLines[2]))) ? (
-                // [advice from AI] ★ isProcessing 중이면 컨테이너 항상 표시!
-                // 묵음 시에도 컨테이너가 사라지지 않고, 새 자막이 즉시 나타남
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minHeight: '30px' }}>
-                  {/* [advice from AI] 1줄 (상단) - 가장 오래된 확정 자막 */}
-                  {liveSubtitleLines && liveSubtitleLines[0] ? (
-                    <div>
-                      <span style={{
-                        color: '#fff',
-                        fontSize: '24px',
-                        fontWeight: '600',
-                        lineHeight: '1.6',
-                        letterSpacing: '0.5px',
-                        textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
-                      }}>
-                        {liveSubtitleLines[0]}
-                      </span>
-                    </div>
-                  ) : null}
-                  {/* [advice from AI] 2줄 (중간) - 이전 확정 자막 */}
-                  {liveSubtitleLines && liveSubtitleLines[1] ? (
-                  <div>
-                      <span style={{
-                        color: '#fff',
-                        fontSize: '24px',
-                        fontWeight: '600',
-                        lineHeight: '1.6',
-                        letterSpacing: '0.5px',
-                        textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
-                      }}>
-                        {liveSubtitleLines[1]}
-                      </span>
-                    </div>
-                  ) : null}
-                  {/* [advice from AI] 3줄 (하단) - 현재 인식 중인 자막 */}
-                  <div style={{ minHeight: '30px' }}>
+              ) : (isProcessing || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]))) ? (
+                // [advice from AI] ★ 60자 FIFO 자막 - 상단(오래된) / 하단(최신)
+                // 부드러운 텍스트 전환 애니메이션 적용
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '6px', 
+                  minHeight: '30px',
+                  overflow: 'hidden'
+                }}>
+                  {/* [advice from AI] 상단 - 올라간 텍스트 */}
+                  <div style={{
+                    transition: 'all 0.3s ease-out',
+                    opacity: liveSubtitleLines && liveSubtitleLines[0] ? 1 : 0,
+                    transform: liveSubtitleLines && liveSubtitleLines[0] ? 'translateY(0)' : 'translateY(10px)',
+                    minHeight: '32px'
+                  }}>
                     <span style={{
                       color: '#fff',
                       fontSize: '24px',
                       fontWeight: '600',
-                      lineHeight: '1.6',
+                      lineHeight: '1.5',
                       letterSpacing: '0.5px',
-                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
+                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
+                      transition: 'all 0.3s ease-out'
                     }}>
-                      {liveSubtitleLines && liveSubtitleLines[2] ? liveSubtitleLines[2] : ''}
-                      {/* [advice from AI] 입력 중 커서 표시 - 항상 표시하여 수집 중임을 알림 */}
-                      {isProcessing && (
-                        <span style={{
-                          display: 'inline-block',
-                          width: '2px',
-                          height: '1.2em',
-                          background: '#fff',
-                          marginLeft: '2px',
-                          verticalAlign: 'middle',
-                          animation: 'blink 0.7s infinite'
-                        }} />
-                      )}
+                      {liveSubtitleLines && liveSubtitleLines[0] ? liveSubtitleLines[0] : ''}
+                    </span>
+                  </div>
+                  {/* [advice from AI] 하단 - 현재 채워지는 텍스트 */}
+                  <div style={{
+                    transition: 'all 0.3s ease-out',
+                    opacity: liveSubtitleLines && liveSubtitleLines[1] ? 1 : 0,
+                    transform: liveSubtitleLines && liveSubtitleLines[1] ? 'translateY(0)' : 'translateY(15px)',
+                    minHeight: '32px'
+                  }}>
+                    <span style={{
+                      color: '#fff',
+                      fontSize: '24px',
+                      fontWeight: '600',
+                      lineHeight: '1.5',
+                      letterSpacing: '0.5px',
+                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
+                      transition: 'all 0.3s ease-out'
+                    }}>
+                      {liveSubtitleLines && liveSubtitleLines[1] ? liveSubtitleLines[1] : ''}
                     </span>
                   </div>
                 </div>

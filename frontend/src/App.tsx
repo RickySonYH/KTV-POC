@@ -212,7 +212,7 @@ function App() {
   // 4. 묵음 fade_timeout_ms 지속 시 페이드아웃
   // 5. ★ 후처리 결과가 바뀌면 이미 표시된 자막도 교체 가능 (실시간 업데이트)
   // =============================================================================
-  const [liveSubtitleLines, setLiveSubtitleLines] = useState<string[]>(['', '', '']);  // 3줄 고정 (상단, 중간, 하단)
+  const [liveSubtitleLines, setLiveSubtitleLines] = useState<string[]>(['', '']);  // 2줄 고정 (이전확정, 최신확정) - 수집줄은 백그라운드
   const lastLiveSpeakerRef = useRef<string | undefined>(undefined);
   
   
@@ -315,11 +315,19 @@ function App() {
   // - 30자 초과 시: updateCollectorLine에서 졸업 처리
   const collectorAccumulatedRef = useRef<string>('');  // 확정된 텍스트 누적
   
-  // [advice from AI] ★★★ 졸업 텍스트 중복 방지 ★★★
-  // - 졸업 시 전체 텍스트를 기억 → 같은 segment 내에서 겹치는 부분 제거
-  // - segment 변경 시 초기화 → 새 내용이 사라지는 것 방지
-  const graduatedTextRef = useRef<string>('');       // 졸업한 텍스트 전체 (30자)
-  const graduatedSegmentRef = useRef<number>(0);     // 졸업 시점의 segment count
+  // [advice from AI] ★★★ 30자 블록 졸업 시스템 ★★★
+  // - graduatedBlockRef: 상단에 올라간 30자 블록
+  // - currentBlockRef: 현재 하단에서 채워지는 텍스트 (0~30자)
+  // - 30자 차면 → 통째로 상단으로 졸업 → 하단 비우고 새로 시작
+  const lastLinesRef = useRef<Array<{text: string; speaker: number; start: string; end: string}>>([]);
+  const lastGraduatedSpeakerRef = useRef<number>(-1);
+  const collectorStartTimeRef = useRef<number>(0);
+  const addedToListIndexRef = useRef<number>(-1);
+  // [advice from AI] ★★★ 30자 블록 관리 ★★★
+  const graduatedBlockRef = useRef<string>('');      // 상단 = 올라간 30자 블록
+  const currentBlockRef = useRef<string>('');        // 하단 = 현재 채우는 중 (0~30자)
+  const lastProcessedTextRef = useRef<string>('');   // 마지막으로 처리한 전체 텍스트
+  const CHARS_PER_LINE = 30;     // 한 줄당 글자 수
 
   // [advice from AI] ★ 버퍼 타임아웃 기반 자막 확정
   // - WhisperLiveKit의 lines가 잘 안 오는 문제 대응
@@ -329,8 +337,8 @@ function App() {
   const bufferStartTimeRef = useRef<number>(0);     // 버퍼 시작 시간
   const BUFFER_CONFIRM_TIMEOUT = 5000;              // [advice from AI] 5초로 늘려서 WhisperLiveKit이 수정할 시간 확보
 
-  // [advice from AI] 문장을 자막 목록에 추가하는 함수
-  const addSentenceToList = useCallback((text: string, speaker?: string) => {
+  // [advice from AI] 문장을 자막 목록에 추가하는 함수 (향후 사용 예정)
+  const _addSentenceToList = useCallback((text: string, speaker?: string) => {
     const trimmedText = text.trim();
     if (!trimmedText) return;
     
@@ -380,18 +388,16 @@ function App() {
     // [advice from AI] 빈 텍스트일 때는 수집창만 비움 (졸업한 줄들은 유지!)
     if (text.length === 0) {
       collectorLineRef.current = '';
-      const newLines = [topLineRef.current, middleLineRef.current, ''];
-      setLiveSubtitleLines(newLines);
+      setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
       console.log(`[COLLECTOR] ⚠️ 빈 입력 → 수집창만 비움`);
       return;
     }
     
-    // [advice from AI] ★ 수집창이 30자 이하면 그냥 표시
+    // [advice from AI] ★ 수집창이 30자 이하면 백그라운드에서만 처리
     if (text.length <= maxLen) {
       collectorLineRef.current = text;
-      const newLines = [topLineRef.current, middleLineRef.current, text];
-      setLiveSubtitleLines(newLines);
-      console.log(`[COLLECTOR] 📝 수집 중: "${text}" (${text.length}자)`);
+      // 화면 업데이트 없음 (수집줄은 백그라운드)
+      console.log(`[COLLECTOR] 📝 수집 중(백그라운드): "${text}" (${text.length}자)`);
       return;
     }
     
@@ -419,20 +425,11 @@ function App() {
     collectorLineRef.current = remainingText;    // 나머지가 수집창으로
     
     // [advice from AI] ★★★ 핵심: 졸업하면 누적 텍스트 초기화! ★★★
-    // - 졸업 텍스트 = 누적 + 버퍼 일부 → 중간 줄로 이동
-    // - 남은 텍스트 = 버퍼 나머지 → 새 수집창
-    // - 다음 버퍼가 확장되면 남은 텍스트 포함
-    // - 다음 segment면 남은 텍스트가 누적에 추가됨
     collectorAccumulatedRef.current = '';
+    console.log(`[COLLECTOR] 🔄 누적 초기화 + 졸업 텍스트 저장 "${graduatingText.substring(0, 20)}..."`);
     
-    // [advice from AI] ★★★ 졸업 텍스트 저장 (중복 방지용) ★★★
-    // - 같은 segment 내에서 새 버퍼와 겹치는 부분 제거에 사용
-    graduatedTextRef.current = graduatingText;
-    graduatedSegmentRef.current = lastSegmentLinesCountRef.current;
-    console.log(`[COLLECTOR] 🔄 누적 초기화 + 졸업 텍스트 저장 "${graduatingText.substring(0, 20)}..." (segment: ${graduatedSegmentRef.current})`);
-    
-    const newLines = [topLineRef.current, middleLineRef.current, remainingText];
-    setLiveSubtitleLines(newLines);
+    // 화면 업데이트 - 2줄만 (수집줄은 백그라운드)
+    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
     
     console.log(`[COLLECTOR] 🖥️ 화면:`, {
       top: topLineRef.current ? `"${topLineRef.current.substring(0, 25)}..."` : '(empty)',
@@ -543,378 +540,307 @@ function App() {
     currentSentenceRef.current = '';
   }, [isRecentlyAdded, addToRecentTexts]);
 
-  // [advice from AI] ★★★ 새 수집창 버퍼 시스템 ★★★
-  // - 수집창 자체에서 버퍼를 관리하고, segment 기반으로 교체/누적 결정
-  // - 졸업 창(상단/중단)은 고정, 수집창(하단)만 실시간 변경
-  const handleBufferUpdate = useCallback((buffer: BufferUpdate) => {
-    const rawText = buffer.text.trim();
+  // [advice from AI] ★★★ 확정 인덱스 기반 졸업 시스템 ★★★
+  // 핵심 원칙:
+  // 1. lines[confirmedIndex+1]이 생기면 → 졸업!
+  // 2. buffer → 수집줄 (실시간 표시)
+  // 3. 20자 넘으면 강제 졸업
+  // 4. 화자 변경 시 '-' 추가
+  // 5. 4초 묵음 → 자막창 초기화
+  
+  // [advice from AI] 시간 문자열 파싱 ("0:00:05" → 5.0)
+  const parseTimeString = (timeStr: string | number | undefined): number => {
+    if (typeof timeStr === 'number') return timeStr;
+    if (!timeStr || typeof timeStr !== 'string') return 0;
+    const parts = timeStr.split(':');
+    if (parts.length === 3) {
+      const [h, m, s] = parts.map(Number);
+      return h * 3600 + m * 60 + s;
+    }
+    if (parts.length === 2) {
+      const [m, s] = parts.map(Number);
+      return m * 60 + s;
+    }
+    return 0;
+  };
+  
+  // [advice from AI] 졸업 처리 함수 - lines 항목을 졸업시킴
+  const graduateLine = useCallback((lineText: string, lineSpeaker: number, startTimeStr: string, endTimeStr: string) => {
+    const text = lineText.trim();
+    if (!text) return;
     
-    // [advice from AI] 빈 버퍼는 그냥 무시 (로그도 안 찍음)
-    if (!rawText || buffer.isNoAudio) {
-      return;
+    // 후처리
+    const processed = subtitleRules.postprocess_enabled
+      ? (postprocessText(text, true) || '').trim()
+      : text;
+    if (!processed) return;
+    
+    // 화자 변경 시 '-' 추가
+    let finalText = processed;
+    if (lastGraduatedSpeakerRef.current >= 0 && 
+        lineSpeaker >= 0 && 
+        lineSpeaker !== lastGraduatedSpeakerRef.current) {
+      finalText = '- ' + processed;
+      console.log(`[졸업] 🔄 화자 변경: ${lastGraduatedSpeakerRef.current} → ${lineSpeaker}`);
     }
     
-    // [advice from AI] ★★★ 전후처리를 맨 앞에서 수행! ★★★
-    // - 할루시네이션, 비속어, 고유명사, 정부용어 등 모든 처리 포함
-    // - 이후 모든 비교는 후처리된 텍스트로 수행 (일관성 확보)
-    const processedText = subtitleRules.postprocess_enabled
-      ? (postprocessText(rawText, false) || '').trim()
-      : rawText;
-    
-    // [advice from AI] ★ 전후처리 결과가 비어있으면 무시 (할루시네이션 등으로 제거됨)
-    if (!processedText) {
-      console.log(`[BUFFER] 🚫 전후처리 결과 빈 문자열: "${rawText.substring(0, 30)}..." → 무시`);
-      return;
+    // 화자 업데이트
+    if (lineSpeaker >= 0) {
+      lastGraduatedSpeakerRef.current = lineSpeaker;
     }
     
-    // [advice from AI] ★ 추가 할루시네이션 패턴 (전후처리에서 통과한 것 중 추가 필터링)
-    const BUFFER_HALLUCINATION_PATTERNS = [
-      /^(이제\s*)?(마침|드디어)\s*(감사합니다|입니다)?\.?$/i,
-      /^(네|예|어|응|음|아)\s*(네|예|어|응|음|아)*\s*\.?$/i,
-      /^감사합니다\.?$/i,
-      /^(알겠습니다|그렇습니다|맞습니다)\.?$/i,
-      /^(여러분|시청자\s*여러분).*$/i,
-      /^MBC\s*뉴스/i,
-      /^자막\s*(제공|협찬)/i,
-      /^(다음|이상)\s*(뉴스|소식)/i,
-    ];
+    console.log(`[졸업] 🎓 "${finalText.substring(0, 30)}..." (${finalText.length}자)`);
     
-    const SHORT_HALLUCINATION_WORDS = ['마침', '드디어', '네', '예', '어', '응', '음', '감사', '알겠', '맞습'];
-    const isBufferHallucination = BUFFER_HALLUCINATION_PATTERNS.some(p => p.test(processedText));
-    const isShortHallucination = processedText.length <= 6 && 
-      SHORT_HALLUCINATION_WORDS.some(w => processedText.includes(w));
+    // 졸업 처리: 이전 졸업줄 → 최상단, 새 졸업줄 → 가운데
+    topLineRef.current = middleLineRef.current;
+    middleLineRef.current = finalText;
+    collectorLineRef.current = '';  // 수집줄 클리어
     
-    if (isBufferHallucination || isShortHallucination) {
-      console.log(`[BUFFER] 🚫 추가 할루시네이션 필터링: "${processedText}" (강화=${isBufferHallucination}, 짧은=${isShortHallucination})`);
-      return;
-    }
+    // 화면 업데이트
+    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
     
-    // [advice from AI] ★ 이제 모든 비교는 processedText로! (일관성)
-    const prevBuffer = lastBufferTextRef.current;  // 이전에 저장된 것도 후처리된 텍스트
+    // 자막 목록에 추가
+    const videoStartTime = currentTimeRef.current - parseTimeString(endTimeStr);
+    const startTime = videoStartTime + parseTimeString(startTimeStr);
+    const endTime = videoStartTime + parseTimeString(endTimeStr);
     
-    // [advice from AI] 동일한 텍스트가 반복 호출되면 무시 (로그 안 찍음)
-    if (processedText === prevBuffer) {
-      return;
-    }
-    
-    // [advice from AI] 실제 새 텍스트가 있을 때만 로그 출력
-    console.log(`[BUFFER] 📥 "${processedText.substring(0, 40)}..." (${processedText.length}자, 원본: ${rawText.length}자)`)
-    
-    // ★ 2. 화자 변경 감지
-    // [advice from AI] ★ 화자분리 규칙:
-    // - 화자가 바뀌면 해당 텍스트 앞에 '-' 붙임
-    // - 같은 화자면 '-' 없이 텍스트만 추가
-    const prevSpeaker = lastLiveSpeakerRef.current;
-    const currSpeaker = buffer.speaker;
-    
-    // [advice from AI] ★ 화자 변경: 둘 다 있고, 서로 다름
-    const speakerChanged = !!prevSpeaker && !!currSpeaker && prevSpeaker !== currSpeaker;
-    
-    // ★ 항상 화자 정보 로깅 (디버깅) - 더 자세한 조건 출력
-    console.log(`[BUFFER] 🎤 speaker: prev=${prevSpeaker || 'null'}, curr=${currSpeaker || 'null'}, ` + 
-      `prevValid=${!!prevSpeaker}, currValid=${!!currSpeaker}, different=${prevSpeaker !== currSpeaker}, changed=${speakerChanged}`);
-    
-    if (speakerChanged) {
-      console.log(`[BUFFER] 🔄 ★★★ 화자 변경 감지! ${prevSpeaker} → ${currSpeaker} → '-' 추가`);
-      // [advice from AI] ★★★ 화자 변경 시 수집창 내용은 유지! (이어붙이기 위해)
-      // displayTextRef, lastCompletedTextRef, lastBufferTextRef는 초기화하지 않음
-    }
-    
-    // [advice from AI] ★ 화자 정보 업데이트 (유효한 화자일 때만!)
-    if (currSpeaker) {
-      lastLiveSpeakerRef.current = currSpeaker;
-    }
-    
-    // ★ 3. 핵심 로직: segment 기반 교체/누적 판단!
-    // [advice from AI] ★★★ 새 수집창 버퍼 시스템 ★★★
-    // - segmentId(linesCount)로 segment 구분
-    // - 같은 segment + 확장(포함 관계): 교체 ("안녕" → "안녕하세요")
-    // - 같은 segment + 완전히 다른 텍스트: 이전 버퍼를 누적에 추가하고 새 버퍼 표시
-    // - segment 증가: 이전 버퍼를 누적에 추가
-    // - segment 감소 (리셋): 누적 초기화
-    
-    const currentLinesCount = buffer.linesCount ?? 0;
-    const prevLinesCount = lastSegmentLinesCountRef.current;
-    
-    // [advice from AI] ★★★ 이제 모든 비교는 processedText로! (일관성 확보) ★★★
-    // - prevBuffer도 이전에 저장된 후처리된 텍스트
-    // - bufferForDisplay = processedText (이미 후처리됨)
-    const bufferForDisplay = processedText;  // 이미 전후처리 완료
-    
-    // [advice from AI] ★★★ WhisperLiveKit 버퍼 구조 이해 ★★★
-    // - lines[]: 확정된 문장들 (segment)
-    // - buffer_transcription: 현재 인식 중인 짧은 텍스트
-    // - segment 증가 = lines 추가됨 = 이전 버퍼가 확정됨
-    // - 수집창 = 누적된 확정 텍스트 + 현재 버퍼
-    
-    // [advice from AI] ★★★ 버퍼 리셋 vs 수정 감지 (후처리된 텍스트로 비교!) ★★★
-    // WhisperLiveKit 동작:
-    // - 버퍼 확장: "안녕" → "안녕하세요" (이전 버퍼 포함)
-    // - 버퍼 리셋: "안녕하세요" → "반갑습니다" (완전히 다른 텍스트)
-    // - 버퍼 수정: "대책에 대해서" → "개척에 대해서" (비슷한 내용, 일부 단어만 수정)
-    
-    // ★ 유사도 계산: 공통 단어 비율
-    const getSimilarity = (a: string, b: string): number => {
-      if (!a || !b) return 0;
-      const wordsA = a.split(/\s+/).filter(w => w.length >= 2);
-      const wordsB = b.split(/\s+/).filter(w => w.length >= 2);
-      if (wordsA.length === 0 || wordsB.length === 0) return 0;
-      const commonWords = wordsA.filter(w => wordsB.some(wb => wb.includes(w) || w.includes(wb)));
-      return commonWords.length / Math.max(wordsA.length, wordsB.length);
+    segmentIdRef.current += 1;
+    const subtitle: SubtitleSegment = {
+      id: segmentIdRef.current,
+      startTime: Math.max(0, startTime),
+      endTime: Math.max(0, endTime),
+      text: finalText,
+      speaker: lineSpeaker >= 0 ? `화자${lineSpeaker + 1}` : undefined,
     };
     
-    // ★ 모든 비교는 processedText로!
-    const isBufferExtension = prevBuffer && (
-      processedText.includes(prevBuffer) ||  // 새 버퍼가 이전 버퍼 포함
-      prevBuffer.includes(processedText) ||  // 이전 버퍼가 새 버퍼 포함 (수정)
-      processedText.startsWith(prevBuffer.substring(0, Math.min(3, prevBuffer.length)))  // 앞 3자 일치
-    );
+    addToCache(subtitle);
+    setDisplayedSubtitles(prev => [...prev, subtitle]);
+    addToRecentTexts(finalText);
+  }, [subtitleRules.postprocess_enabled, addToCache, addToRecentTexts]);
+  
+  // [advice from AI] 강제 졸업 (버퍼가 20자 넘을 때)
+  const forceGraduateFromBuffer = useCallback((text: string) => {
+    if (!text || text.length < 5) return;
     
-    // ★ 버퍼 수정 감지: 유사도 40% 이상이면 수정 (누적 안 함)
-    const similarity = prevBuffer ? getSimilarity(prevBuffer, processedText) : 0;
-    const isBufferCorrection = similarity >= 0.4;
+    const processed = subtitleRules.postprocess_enabled
+      ? (postprocessText(text, true) || '').trim()
+      : text;
+    if (!processed) return;
     
-    // ★ 버퍼 리셋 감지: 확장도 아니고 수정도 아닌 경우만 누적 추가
-    // prevBuffer도 이미 후처리된 텍스트이므로 다시 후처리 불필요
-    if (prevBuffer && prevBuffer.length >= 2 && !isBufferExtension && !isBufferCorrection) {
-      const accumulated = collectorAccumulatedRef.current;
-      // 중복 방지
-      const isDuplicate = accumulated && (
-        accumulated.endsWith(prevBuffer) ||
-        accumulated.includes(prevBuffer)
-      );
-      
-      if (!isDuplicate) {
-        collectorAccumulatedRef.current = accumulated
-          ? accumulated + ' ' + prevBuffer
-          : prevBuffer;
-        console.log(`[BUFFER] ➕ 버퍼 리셋! 누적 추가 "${prevBuffer.substring(0, 20)}..." → 총 ${collectorAccumulatedRef.current.length}자`);
-      }
-    } else if (isBufferCorrection && !isBufferExtension) {
-      console.log(`[BUFFER] 🔧 버퍼 수정 감지 (유사도 ${(similarity * 100).toFixed(0)}%): 누적 추가 안 함`);
-    }
+    console.log(`[강제졸업] 🎓 "${processed.substring(0, 30)}..." (${processed.length}자)`);
     
-    // ★ segment 변경 처리
-    if (currentLinesCount > prevLinesCount) {
-      console.log(`[BUFFER] 📊 segment 증가: ${prevLinesCount} → ${currentLinesCount}`);
-      // 버퍼 리셋 감지에서 이미 처리됨
-    } else if (currentLinesCount < prevLinesCount) {
-      // ★ segment 감소 (서버 리셋) → 누적 초기화
-      console.log(`[BUFFER] 🔄 segment 리셋(${prevLinesCount}→${currentLinesCount}) → 누적 초기화`);
-      collectorAccumulatedRef.current = '';
-    }
+    // 졸업 처리
+    topLineRef.current = middleLineRef.current;
+    middleLineRef.current = processed;
     
-    // [advice from AI] ★★★ 화자 변경 처리 - 수집창 표시에 '-' 추가 ★★★
-    let bufferWithSpeaker = bufferForDisplay;
-    if (speakerChanged) {
-      bufferWithSpeaker = '- ' + bufferForDisplay;
-      console.log(`[BUFFER] 🔄 화자변경! ${prevSpeaker} → ${currSpeaker} → 버퍼 앞에 '-' 추가`);
-    }
+    // 화면 업데이트 (수집줄은 나중에 설정)
+    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
     
-    // [advice from AI] ★ segment 카운트 및 버퍼 업데이트 (후처리된 텍스트 저장!)
-    lastSegmentLinesCountRef.current = currentLinesCount;
-    lastBufferTextRef.current = processedText;  // 후처리된 텍스트 저장 (일관성)
+    // 자막 목록에 추가
+    const endTime = currentTimeRef.current;
+    const startTime = collectorStartTimeRef.current || Math.max(0, endTime - 3);
     
-    // [advice from AI] ★★★ 세그먼트 기반 중복 방지 (핵심 로직) ★★★
-    // - 같은 segment: 버퍼가 바뀌면 → 중간줄과 비교 → 중간줄 **교체** (수정본)
-    // - segment 증가: 새 내용 → 졸업 텍스트 초기화 → 정상 처리
+    segmentIdRef.current += 1;
+    const subtitle: SubtitleSegment = {
+      id: segmentIdRef.current,
+      startTime,
+      endTime,
+      text: processed,
+      speaker: lastGraduatedSpeakerRef.current >= 0 ? `화자${lastGraduatedSpeakerRef.current + 1}` : undefined,
+    };
     
-    let bufferForCollector = bufferWithSpeaker;
-    const middleLine = middleLineRef.current;
+    addToCache(subtitle);
+    setDisplayedSubtitles(prev => [...prev, subtitle]);
+    addToRecentTexts(processed);
     
-    // ★★★ 같은 segment 내에서 중간줄과 버퍼 비교 ★★★
-    if (middleLine && currentLinesCount === graduatedSegmentRef.current) {
-      // 중간줄의 시작 부분과 버퍼의 시작 부분 비교
-      const getStartWords = (text: string, n: number = 3): string => {
-        return text.split(/\s+/).slice(0, n).join(' ');
-      };
-      
-      const middleStart = getStartWords(middleLine);
-      const bufferStart = getStartWords(bufferWithSpeaker);
-      
-      // 시작 부분이 같으면 → 수정본 → 중간줄 교체
-      const isSameContent = middleStart.length >= 4 && bufferStart.length >= 4 && (
-        middleStart === bufferStart ||
-        middleLine.startsWith(bufferStart.substring(0, 6)) ||
-        bufferWithSpeaker.startsWith(middleStart.substring(0, 6))
-      );
-      
-      if (isSameContent) {
-        // ★ 같은 내용의 수정본! → 중간줄 교체
-        console.log(`[BUFFER] 🔄 같은 segment(${currentLinesCount}) + 같은 시작점 "${middleStart.substring(0, 12)}..." → 중간줄 교체`);
-        
-        const maxLen = MAX_LINE_LENGTH;
-        let breakPoint = Math.min(bufferWithSpeaker.length, maxLen);
-        
-        // 단어 단위로 끊기
-        if (bufferWithSpeaker.length > maxLen) {
-          for (let i = maxLen; i >= Math.floor(maxLen * 0.7); i--) {
-            if (bufferWithSpeaker[i] === ' ') {
-              breakPoint = i;
-              break;
-            }
-          }
-        }
-        
-        const newMiddle = bufferWithSpeaker.slice(0, breakPoint).trim();
-        bufferForCollector = bufferWithSpeaker.slice(breakPoint).trim();
-        
-        // 중간줄 업데이트
-        middleLineRef.current = newMiddle;
-        graduatedTextRef.current = newMiddle;
-        collectorLineRef.current = bufferForCollector;
-        
-        // 화면 갱신
-        setLiveSubtitleLines([topLineRef.current, newMiddle, bufferForCollector]);
-        
-        console.log(`[BUFFER] 🔄 중간줄 교체: "${newMiddle.substring(0, 20)}..." | 수집창: "${bufferForCollector.substring(0, 15) || '(empty)'}"`);
-        
-        // 수집창 업데이트 스킵 (이미 처리됨)
-        return;
-      }
-      
-      // 연속인 경우: 중간줄 끝부분 == 버퍼 시작부분 → 겹침 제거
-      const middleEnd = middleLine.split(/\s+/).slice(-4).join(' ');
-      if (middleEnd.length >= 4 && bufferWithSpeaker.includes(middleEnd)) {
-        const idx = bufferWithSpeaker.indexOf(middleEnd);
-        bufferForCollector = bufferWithSpeaker.slice(idx + middleEnd.length).trim();
-        console.log(`[BUFFER] ✂️ 중간줄 끝과 겹침 "${middleEnd.substring(0, 12)}..." → 제거, 남은: "${bufferForCollector.substring(0, 15)}..."`);
-      }
-    }
-    
-    // ★★★ segment 변경 시 졸업 텍스트 초기화 ★★★
-    if (currentLinesCount !== graduatedSegmentRef.current && currentLinesCount > 0) {
-      if (graduatedTextRef.current) {
-        console.log(`[BUFFER] 📊 segment 변경(${graduatedSegmentRef.current}→${currentLinesCount}) → 졸업 텍스트 초기화 (새 내용!)`);
-      }
-      graduatedTextRef.current = '';
-      // segment 증가 시 graduatedSegmentRef는 졸업 시점에 갱신됨
-    }
-    
-    // [advice from AI] ★★★ 수집창 표시 = 누적 + 현재 버퍼 (중복 제거 후) ★★★
-    const accumulated = collectorAccumulatedRef.current;
-    const textForCollector = accumulated
-      ? accumulated + ' ' + bufferForCollector
-      : bufferForCollector;
-    
-    console.log(`[BUFFER] 📊 수집창: 누적="${accumulated ? accumulated.substring(0, 20) + '...' : '(empty)'}" + 버퍼="${bufferForCollector.substring(0, 15)}..." → ${textForCollector.length}자`);
-    
-    // [advice from AI] ★ 수집창 업데이트 (졸업 처리 포함)
-    updateCollectorLine(textForCollector);
-    
-    // ★ 5. 묵음 타이머 리셋 - 새 텍스트가 오면 타이머 재시작
+    // 수집줄 시작 시간 갱신
+    collectorStartTimeRef.current = endTime;
+  }, [subtitleRules.postprocess_enabled, addToCache, addToRecentTexts]);
+  
+  // [advice from AI] 묵음 타이머 리셋
+  const resetSilenceTimer = useCallback(() => {
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
     }
     silenceTimeoutRef.current = window.setTimeout(() => {
-      // [advice from AI] ★ 묵음 감지 → 화면 자막 페이드아웃 + 텍스트 refs 초기화
-      // ★ lastSegmentLinesCountRef는 WhisperLiveKit 동기화용이므로 초기화하지 않음!
-      console.log(`[SILENCE] ⏱️ ${SUBTITLE_FADE_TIMEOUT}ms 묵음 → 자막 클리어`, {
-        segmentCount: lastSegmentLinesCountRef.current,
-        prevTop: topLineRef.current ? `"${topLineRef.current.substring(0, 15)}..."` : '(empty)',
-        prevMid: middleLineRef.current ? `"${middleLineRef.current.substring(0, 15)}..."` : '(empty)',
-        prevCollector: collectorLineRef.current ? `"${collectorLineRef.current.substring(0, 15)}..."` : '(empty)'
-      });
+      console.log(`[묵음] ⏰ 4초 묵음 → 자막창 초기화`);
       topLineRef.current = '';
       middleLineRef.current = '';
-      collectorLineRef.current = '';  // [advice from AI] 수집창 초기화
-      collectorAccumulatedRef.current = '';  // [advice from AI] 누적 텍스트 초기화
-      graduatedTextRef.current = '';  // [advice from AI] 졸업 텍스트 초기화
-      displayTextRef.current = '';
-      lastCompletedTextRef.current = '';
-      lastBufferTextRef.current = '';
-      setLiveSubtitleLines(['', '', '']);
-      console.log(`[SILENCE] ✅ 클리어 완료 → 새 자막 대기 중`);
-    }, SUBTITLE_FADE_TIMEOUT);
+      collectorLineRef.current = '';
+      graduatedBlockRef.current = '';    // 상단 블록 초기화
+      currentBlockRef.current = '';      // 하단 블록 초기화
+      lastProcessedTextRef.current = ''; // 처리 기록 초기화
+      setLiveSubtitleLines(['', '']);
+    }, 4000);  // 4초 묵음 → 초기화
+  }, []);
+  
+  const handleBufferUpdate = useCallback((buffer: BufferUpdate) => {
+    const lines = buffer.lines || [];
+    const bufferText = (buffer.text || '').trim();
     
-    // ★ 6. 버퍼 타임아웃 기반 자막 목록 확정
-    // [advice from AI] WhisperLiveKit의 lines가 잘 안 오는 문제 대응
-    // 버퍼가 3초간 변경 없으면 현재까지의 텍스트를 자막 목록에 추가
-    
-    // 버퍼 시작 시간 기록 (첫 버퍼일 때)
-    if (!lastBufferForListRef.current) {
-      bufferStartTimeRef.current = currentTimeRef.current;
+    // [advice from AI] 묵음 타이머 리셋 (텍스트가 있을 때만)
+    if (bufferText || lines.length > 0) {
+      resetSilenceTimer();
     }
     
-    // [advice from AI] ★ 자막 목록용 버퍼 = 전체 누적 텍스트 (후처리된 텍스트 사용)
-    // lastCompletedTextRef(확정된 텍스트) + 현재 버퍼
-    const fullText = (lastCompletedTextRef.current + ' ' + processedText).trim();
-    lastBufferForListRef.current = fullText;
-    
-    console.log(`[BUFFER-LIST] 누적: "${fullText.substring(0, 50)}..." (${fullText.length}자)`);
-    
-    // 타임아웃 리셋
-    if (bufferTimeoutRef.current) {
-      clearTimeout(bufferTimeoutRef.current);
+    // ========== 1. lines 리셋 감지 ==========
+    if (lines.length < lastLinesRef.current.length) {
+      console.log(`[lines] 🔄 리셋: ${lastLinesRef.current.length} → ${lines.length}`);
+      lastLinesRef.current = [];
+      addedToListIndexRef.current = -1;
+      graduatedBlockRef.current = '';      // 상단 블록 초기화
+      currentBlockRef.current = '';        // 하단 블록 초기화
+      lastProcessedTextRef.current = '';   // 처리 기록 초기화
+      collectorStartTimeRef.current = currentTimeRef.current;
     }
-    bufferTimeoutRef.current = window.setTimeout(() => {
-      // 타임아웃 만료 → 문장 분리 후 자막 목록에 추가
-      const textToAdd = lastBufferForListRef.current.trim();
-      if (textToAdd && textToAdd !== lastAddedTextRef.current) {
-        const startTime = bufferStartTimeRef.current;
-        const endTime = currentTimeRef.current;
-        
-        // [advice from AI] ★ 문장 분리 후 각각 자막 목록에 추가
-        // 마침표, 물음표, 느낌표 기준으로 분리
-        const rawSentences = textToAdd
-          .split(/(?<=[.?!。？！])\s*/)
-          .map(s => s.trim())
-          .filter(s => s.length > 0);
-        
-        // 마침표 없으면 전체를 하나로
-        if (rawSentences.length === 0) {
-          rawSentences.push(textToAdd);
-        }
-        
-        console.log(`[BUFFER-CONFIRM] ⏰ 버퍼 확정: ${rawSentences.length}개 문장 [${startTime.toFixed(1)}s~${endTime.toFixed(1)}s]`);
-        
-        // 각 문장에 후처리 적용 + 강화된 중복 체크 (설정에 따라)
-        const processedSentences: string[] = [];
-        for (const sentence of rawSentences) {
-          // [advice from AI] ★ postprocess_enabled 설정에 따라 후처리 적용
-          const processed = subtitleRules.postprocess_enabled 
-            ? postprocessText(sentence, true)
-            : sentence;
-          // [advice from AI] ★ 최근 5개 텍스트와 비교 (강화된 중복 방지)
-          if (processed && !isRecentlyAdded(processed)) {
-            processedSentences.push(processed);
-          } else if (processed) {
-            console.log(`[BUFFER-CONFIRM] ⏭️ 중복 스킵: "${processed.substring(0, 30)}..."`);
+    
+    // ========== 2. 후처리 함수 ==========
+    const processLineText = (text: string, speaker: number): string => {
+      if (!text) return '';
+      const processed = subtitleRules.postprocess_enabled
+        ? (postprocessText(text, true) || '').trim()
+        : text.trim();
+      if (!processed) return '';
+      
+      // 화자 변경 시 '-' 추가
+      if (lastGraduatedSpeakerRef.current >= 0 && 
+          speaker >= 0 && 
+          speaker !== lastGraduatedSpeakerRef.current) {
+        return '- ' + processed;
+      }
+      return processed;
+    };
+    
+    // ========== 3. 전체 lines 텍스트 수집 ==========
+    let allConfirmedText = '';
+    for (const line of lines) {
+      if (line && line.text?.trim() && line.speaker !== -2) {
+        const processed = processLineText(line.text, line.speaker);
+        if (processed) {
+          if (allConfirmedText) {
+            allConfirmedText += ' ' + processed;
+          } else {
+            allConfirmedText = processed;
+          }
+          if (line.speaker >= 0) {
+            lastGraduatedSpeakerRef.current = line.speaker;
           }
         }
+      }
+    }
+    
+    // ========== 4. 30자 블록 졸업 시스템 ==========
+    // [advice from AI] ★★★ 핵심: 하단 30자 차면 → 상단으로 졸업 → 하단 비우고 새로 시작 ★★★
+    
+    // 새로 추가된 텍스트 계산
+    const prevText = lastProcessedTextRef.current;
+    let newText = '';
+    
+    if (allConfirmedText.startsWith(prevText)) {
+      // 텍스트가 확장됨 (정상적인 추가)
+      newText = allConfirmedText.slice(prevText.length);
+    } else {
+      // 텍스트가 수정되거나 리셋됨 → 전체를 새 텍스트로
+      newText = allConfirmedText;
+      currentBlockRef.current = '';
+      graduatedBlockRef.current = '';
+    }
+    
+    lastProcessedTextRef.current = allConfirmedText;
+    
+    // 새 텍스트를 현재 블록에 추가
+    if (newText) {
+      currentBlockRef.current += newText;
+      
+      // 30자 넘으면 졸업!
+      while (currentBlockRef.current.length >= CHARS_PER_LINE) {
+        // 앞 30자 → 상단으로 졸업
+        graduatedBlockRef.current = currentBlockRef.current.slice(0, CHARS_PER_LINE);
+        // 나머지 → 하단에서 새로 시작
+        currentBlockRef.current = currentBlockRef.current.slice(CHARS_PER_LINE);
         
-        if (processedSentences.length > 0) {
-          // 타임스탬프 균등 분배
-          const totalDuration = Math.max(endTime - startTime, 1);
-          const durationPerSentence = totalDuration / processedSentences.length;
+        console.log(`[졸업] 🎓 상단으로 이동: "${graduatedBlockRef.current}"`);
+      }
+    }
+    
+    const topLine = graduatedBlockRef.current;
+    const bottomLine = currentBlockRef.current;
+    
+    // 변경 감지
+    if (topLine !== topLineRef.current || bottomLine !== middleLineRef.current) {
+      console.log(`[졸업] 📝 상단: "${topLine}" (${topLine.length}자) | 하단: "${bottomLine}" (${bottomLine.length}자)`);
+    }
+    
+    topLineRef.current = topLine;
+    middleLineRef.current = bottomLine;
+    
+    // ========== 3. 새 lines가 자막 목록에 추가 ==========
+    // 마지막 lines가 새로 추가됐으면 자막 목록에도 추가
+    if (lines.length > 0 && lines.length - 1 > addedToListIndexRef.current) {
+      const newIdx = lines.length - 1;
+      const newLine = lines[newIdx];
+      
+      if (newLine && newLine.text?.trim() && newLine.speaker !== -2) {
+        const finalText = processLineText(newLine.text, newLine.speaker);
+        
+        if (finalText) {
+          // 자막 목록에 추가
+          const videoStartTime = currentTimeRef.current - parseTimeString(newLine.end);
+          const startTime = videoStartTime + parseTimeString(newLine.start);
+          const endTime = videoStartTime + parseTimeString(newLine.end);
           
-          const newSubtitles: SubtitleSegment[] = [];
-          processedSentences.forEach((processed, index) => {
-            segmentIdRef.current += 1;
-            const sentenceStart = startTime + (durationPerSentence * index);
-            const sentenceEnd = startTime + (durationPerSentence * (index + 1));
-            
-            newSubtitles.push({
-              id: segmentIdRef.current,
-              startTime: sentenceStart,
-              endTime: sentenceEnd,
-              text: processed,
-              speaker: lastLiveSpeakerRef.current
-            });
-            displayedIdsRef.current.add(segmentIdRef.current);
-            addToRecentTexts(processed);  // [advice from AI] ★ 최근 목록에 추가
-            console.log(`[BUFFER-CONFIRM] ✅ "${processed.substring(0, 30)}..." [${sentenceStart.toFixed(1)}s]`);
-          });
+          segmentIdRef.current += 1;
+          const subtitle: SubtitleSegment = {
+            id: segmentIdRef.current,
+            startTime: Math.max(0, startTime),
+            endTime: Math.max(0, endTime),
+            text: finalText,
+            speaker: newLine.speaker >= 0 ? `화자${newLine.speaker + 1}` : undefined,
+          };
           
-          setDisplayedSubtitles(prev => [...prev, ...newSubtitles]);
-          setLatestSubtitleId(segmentIdRef.current);
+          addToCache(subtitle);
+          setDisplayedSubtitles(prev => [...prev, subtitle]);
+          addToRecentTexts(finalText);
+          
+          console.log(`[자막목록] ➕ "${finalText.substring(0, 30)}..." [${startTime.toFixed(1)}s~${endTime.toFixed(1)}s]`);
+        }
+        
+        addedToListIndexRef.current = newIdx;
+      }
+    }
+    
+    // ========== 4. buffer → 수집줄 ==========
+    let collector = '';
+    
+    if (bufferText) {
+          const processed = subtitleRules.postprocess_enabled 
+        ? (postprocessText(bufferText, false) || '').trim()
+        : bufferText;
+      
+      if (processed) {
+        collector = processed;
+        
+        // 수집줄 시작 시간 기록
+        if (!collectorStartTimeRef.current) {
+          collectorStartTimeRef.current = currentTimeRef.current;
         }
       }
-      // 버퍼 리셋
-      lastBufferForListRef.current = '';
-      bufferStartTimeRef.current = currentTimeRef.current;
-    }, BUFFER_CONFIRM_TIMEOUT);
-  }, [updateCollectorLine, SUBTITLE_FADE_TIMEOUT, BUFFER_CONFIRM_TIMEOUT, isRecentlyAdded, addToRecentTexts]);
+    }
+    
+    // 수집줄이 바뀌었을 때만 로그
+    if (collector !== collectorLineRef.current) {
+      console.log(`[수집줄] 📝 "${collector.substring(0, 30)}${collector.length > 30 ? '...' : ''}" (${collector.length}자)`);
+    }
+    
+    collectorLineRef.current = collector;
+    
+    // ========== 5. 화면 업데이트 (2줄만 표시 - 수집줄은 백그라운드) ==========
+    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
+    
+    // 이전 lines 저장
+    lastLinesRef.current = lines.map(l => ({...l}));
+    lastSegmentLinesCountRef.current = lines.length;
+  }, [subtitleRules.postprocess_enabled, resetSilenceTimer, addToCache, addToRecentTexts]);
 
   // [advice from AI] 비디오 오디오 직접 캡처 → WhisperLiveKit 실시간 STT
   const { 
@@ -952,7 +878,7 @@ function App() {
     currentSentenceRef.current = '';
     displayTextRef.current = '';
     lastCompletedTextRef.current = '';
-    setLiveSubtitleLines(['', '', '']);
+    setLiveSubtitleLines(['', '']);
     
     // [advice from AI] 자막 규칙 ref 초기화 (3줄)
     topLineRef.current = '';
@@ -1190,8 +1116,8 @@ function App() {
     setBufferingCountdown(null);
   }, []);
 
-  // [advice from AI] Whisper STT 서비스 초기화
-  const resetWhisperSTT = useCallback(async () => {
+  // [advice from AI] Whisper STT 서비스 초기화 (향후 사용 예정)
+  const _resetWhisperSTT = useCallback(async () => {
     if (isResettingSTT) return;
     
     setIsResettingSTT(true);
@@ -1278,7 +1204,7 @@ function App() {
       // ★ WhisperLiveKit 모드: 재생 시 실시간 WebSocket 캡처
       console.log('[APP] ▶️ 재생 시작 → WhisperLiveKit 실시간 STT 캡처!');
       // [advice from AI] ★ 첫 캡처 시작 시에만 초기화 (일시정지 후 재개는 유지!)
-      setLiveSubtitleLines(['', '', '']);
+      setLiveSubtitleLines(['', '']);
       topLineRef.current = '';
       middleLineRef.current = '';
       collectorLineRef.current = '';  // 수집창

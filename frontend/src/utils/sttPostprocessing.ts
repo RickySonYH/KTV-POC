@@ -1001,7 +1001,7 @@ export function isStrongHallucination(text: string): boolean {
  * @param text 입력 텍스트
  * @param forSubtitleList 자막 목록용 (true면 할루시네이션 필터 더 관대하게)
  */
-export function postprocessText(text: string, forSubtitleList: boolean = false): string {
+export function postprocessText(text: string, _forSubtitleList: boolean = false): string {
   if (!text) return '';
 
   // 0. 사전이 로드되지 않았으면 비동기 로드 시작 (첫 호출 시)

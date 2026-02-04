@@ -13,11 +13,21 @@ export interface VideoAudioSubtitle {
   isFinal: boolean;
 }
 
+// [advice from AI] lines 항목 인터페이스
+export interface LineItem {
+  text: string;
+  speaker: number;
+  start: string;
+  end: string;
+}
+
 export interface BufferUpdate {
   text: string;
   speaker?: string;
-  isNoAudio?: boolean;  // [advice from AI] 오디오 없음/음악 감지용
-  linesCount?: number;  // [advice from AI] 현재 lines.length - 가상 segment ID로 활용하여 중복 방지
+  isNoAudio?: boolean;
+  linesCount?: number;
+  // [advice from AI] ★ 확정 인덱스 기반 졸업을 위해 lines 전체 전달
+  lines?: LineItem[];
 }
 
 interface UseVideoAudioSTTProps {
@@ -73,11 +83,60 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
   // [advice from AI] 캡처 시작 시점의 비디오 시간 (타임스탬프 계산용)
   const captureStartVideoTimeRef = useRef(0);
   const lastSpeakerRef = useRef<number | undefined>(undefined);
+  
+  // [advice from AI] ★★★ WhisperLiveKit 상태 모니터링 ★★★
+  const lastMessageTimeRef = useRef<number>(0);        // 마지막 메시지 수신 시간
+  const healthCheckIntervalRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const MAX_RECONNECT_ATTEMPTS = 3;
+  const MESSAGE_TIMEOUT_MS = 30000;  // 30초 동안 메시지 없으면 문제로 판단
 
   const updateStatus = useCallback((newStatus: 'idle' | 'connecting' | 'capturing' | 'error') => {
     setStatus(newStatus);
     onStatusChange?.(newStatus);
   }, [onStatusChange]);
+
+  // [advice from AI] ★ startCaptureRef를 위한 forward declaration
+  const startCaptureRef = useRef<(() => Promise<void>) | null>(null);
+  
+  // [advice from AI] ★★★ 자동 재연결 함수 ★★★
+  const attemptReconnect = useCallback(async () => {
+    const video = videoElementRef.current;
+    if (!video) {
+      console.error('[HEALTH] ❌ 비디오 요소 없음 → 재연결 불가');
+      return;
+    }
+    
+    console.log('[HEALTH] 🔄 WhisperLiveKit 재연결 시도...');
+    
+    // 기존 WebSocket 정리
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch (e) {
+        // ignore
+      }
+      wsRef.current = null;
+    }
+    
+    // 기존 AudioContext 정리
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {
+        // ignore
+      }
+      audioContextRef.current = null;
+    }
+    
+    // 잠시 대기 후 재연결
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // startCapture 재호출
+    if (startCaptureRef.current) {
+      startCaptureRef.current();
+    }
+  }, []);
 
   // [advice from AI] 비디오 오디오 캡처 시작
   const startCapture = useCallback(async () => {
@@ -276,9 +335,55 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
         captureStartVideoTimeRef.current = video.currentTime || 0;
         lastLinesCountRef.current = 0;
         processedLinesSetRef.current.clear();  // [advice from AI] ★ 처리된 lines 추적 초기화
+        lastMessageTimeRef.current = Date.now();  // 초기 타임스탬프
         setIsCapturing(true);
         updateStatus('capturing');
         console.log(`[VIDEO-STT] 🎙️ 캡처 시작! 비디오 시간: ${captureStartVideoTimeRef.current.toFixed(1)}s`);
+        
+        // [advice from AI] ★★★ WhisperLiveKit 헬스체크 시작 ★★★
+        if (healthCheckIntervalRef.current) {
+          clearInterval(healthCheckIntervalRef.current);
+        }
+        healthCheckIntervalRef.current = window.setInterval(async () => {
+          const now = Date.now();
+          const timeSinceLastMessage = now - lastMessageTimeRef.current;
+          
+          // 비디오가 재생 중일 때만 체크
+          if (videoElementRef.current && !videoElementRef.current.paused) {
+            if (timeSinceLastMessage > MESSAGE_TIMEOUT_MS) {
+              console.warn(`[HEALTH] ⚠️ ${(timeSinceLastMessage / 1000).toFixed(0)}초 동안 메시지 없음 → 재연결 시도`);
+              
+              if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttemptsRef.current++;
+                console.log(`[HEALTH] 🔄 재연결 시도 ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+                
+                // [advice from AI] ★ 자동 재연결 실행
+                updateStatus('connecting');
+                
+                // 기존 WebSocket 정리
+                if (wsRef.current) {
+                  try { wsRef.current.close(); } catch (_e) { /* ignore */ }
+                  wsRef.current = null;
+                }
+                
+                // 잠시 대기 후 재연결
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                if (startCaptureRef.current) {
+                  startCaptureRef.current();
+                }
+              } else {
+                console.error(`[HEALTH] ❌ 재연결 ${MAX_RECONNECT_ATTEMPTS}회 실패 → 수동 재시작 필요`);
+                updateStatus('error');
+                // 헬스체크 중지
+                if (healthCheckIntervalRef.current) {
+                  clearInterval(healthCheckIntervalRef.current);
+                  healthCheckIntervalRef.current = null;
+                }
+              }
+            }
+          }
+        }, 10000);  // 10초마다 체크
         
         // [advice from AI] ★★★ 초반 텍스트 손실 방지 - 준비 완료 후 비디오 재생 ★★★
         if (wasPlaying) {
@@ -295,6 +400,10 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          
+          // [advice from AI] ★ 메시지 수신 시간 업데이트 (헬스체크용)
+          lastMessageTimeRef.current = Date.now();
+          reconnectAttemptsRef.current = 0;  // 성공적으로 메시지 받으면 재시도 카운트 리셋
           
           // [advice from AI] 설정/종료 메시지는 무시
           if (data.type === 'config' || data.type === 'ready_to_stop') {
@@ -393,20 +502,14 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
             console.log(`[BUFFER-SPEAKER] 📤 lastSpeakerRef=${currentSpeaker}, lastLineRaw=${lastLineRawSpeaker}, speakerStr=${speakerStr || 'null'}`);
           }
           
-          if (bufferText && bufferText.trim() && onBufferUpdate) {
-            // [advice from AI] linesCount 전달 - 가상 segment ID로 활용하여 중복 방지
+          // [advice from AI] ★ 항상 lines 전체 전달 (확정 인덱스 기반 졸업용)
+          if (onBufferUpdate) {
             onBufferUpdate({
-              text: bufferText.trim(),
-              speaker: speakerStr,
-              linesCount: lines.length  // ★ 핵심: 같은 linesCount면 같은 segment → 교체
-            });
-          } else if (onBufferUpdate) {
-            // 빈 버퍼 전달 (로그 없음)
-            onBufferUpdate({
-              text: '',
+              text: bufferText?.trim() || '',
               speaker: speakerStr,
               isNoAudio: data.status === 'no_audio_detected',
-              linesCount: lines.length
+              linesCount: lines.length,
+              lines: lines  // ★ 핵심: lines 전체 전달
             });
           }
 
@@ -438,6 +541,9 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
     }
   }, [getVideoElement, onSubtitle, onBufferUpdate, updateStatus, wsUrl, status]);
 
+  // [advice from AI] ★ startCaptureRef에 함수 저장 (자동 재연결에서 사용)
+  startCaptureRef.current = startCapture;
+
   // 캡처 중지
   const stopCaptureRef = useRef<() => void>(() => {});
   
@@ -447,6 +553,13 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
     }
     
     console.log('[VIDEO-STT] 🛑 캡처 중지');
+
+    // [advice from AI] 헬스체크 인터벌 정리
+    if (healthCheckIntervalRef.current) {
+      clearInterval(healthCheckIntervalRef.current);
+      healthCheckIntervalRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(new Blob([]));

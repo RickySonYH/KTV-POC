@@ -46,7 +46,7 @@ export function useSystemAudioSTT({ onSubtitle, onBufferUpdate, onStatusChange, 
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const _workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const segmentIdRef = useRef(0);
   const lastLinesCountRef = useRef(0);
   const captureStartTimeRef = useRef(0);
