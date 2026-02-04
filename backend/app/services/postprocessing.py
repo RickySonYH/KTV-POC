@@ -236,13 +236,45 @@ SENSITIVE_PATTERNS = [
     (r"[가-힣]{2,4}\s*의\s*카드번호는", "[카드번호]"),
 ]
 
-# 컴파일된 비속어 패턴
+# 컴파일된 비속어 패턴 (정적)
 COMPILED_PROFANITY = [re.compile(p, re.IGNORECASE) for p in PROFANITY_PATTERNS]
+
+# [advice from AI] ★ JSON 비속어 패턴 캐시
+_compiled_json_profanity_cache = None
+_json_profanity_mtime = 0
+
+def _get_compiled_profanity_patterns():
+    """정적 비속어 + JSON 비속어 패턴 병합"""
+    global _compiled_json_profanity_cache, _json_profanity_mtime
+    
+    try:
+        current_mtime = _os.path.getmtime(_DATA_FILE)
+    except OSError:
+        current_mtime = 0
+    
+    # 캐시 갱신 필요 여부 확인
+    if _compiled_json_profanity_cache is None or _json_profanity_mtime != current_mtime:
+        json_profanity = _load_json_profanity()
+        
+        # 정적 패턴 + JSON 패턴 병합 (중복 제거)
+        all_patterns = list(PROFANITY_PATTERNS) + [p for p in json_profanity if p not in PROFANITY_PATTERNS]
+        
+        _compiled_json_profanity_cache = []
+        for p in all_patterns:
+            try:
+                _compiled_json_profanity_cache.append(re.compile(re.escape(p), re.IGNORECASE))
+            except re.error as e:
+                logger.warning(f"⚠️ 잘못된 비속어 패턴 스킵: {p} - {e}")
+        
+        _json_profanity_mtime = current_mtime
+        logger.info(f"🔄 비속어 패턴 재컴파일: 정적 {len(PROFANITY_PATTERNS)}개 + JSON {len(json_profanity)}개 = 총 {len(_compiled_json_profanity_cache)}개")
+    
+    return _compiled_json_profanity_cache
 
 
 def filter_profanity(text: str, replacement: str = "***") -> tuple:
     """
-    [advice from AI] 비속어 필터링
+    [advice from AI] 비속어 필터링 (정적 사전 + JSON 사전 병합)
     
     Args:
         text: 원본 텍스트
@@ -257,7 +289,8 @@ def filter_profanity(text: str, replacement: str = "***") -> tuple:
     result = text
     count = 0
     
-    for pattern in COMPILED_PROFANITY:
+    # [advice from AI] ★ 동적으로 JSON 비속어 포함하여 필터링
+    for pattern in _get_compiled_profanity_patterns():
         matches = pattern.findall(result)
         if matches:
             count += len(matches)
@@ -347,9 +380,11 @@ def replace_music_with_label(text: str) -> str:
 # [advice from AI] 1단계: 할루시네이션 필터
 # =============================================================================
 
-# [advice from AI] 알려진 할루시네이션 패턴 (정규식) - GPT-4.1 엄선
+# [advice from AI] 알려진 할루시네이션 패턴 (정규식) - GPT-4.1 엄선 + 대규모 확장
 HALLUCINATION_PATTERNS = [
-    # ========== 영어 할루시네이션 ==========
+    # ==========================================================================
+    # ★★★ 영어 할루시네이션 (YouTube/영상 관련) ★★★
+    # ==========================================================================
     r"^thank you( for watching)?\.?$",
     r"^thanks for watching\.?$",
     r"^please subscribe\.?$",
@@ -358,86 +393,492 @@ HALLUCINATION_PATTERNS = [
     r"^bye\.?$",
     r"^goodbye\.?$",
     r"^(Hello|Hi|Thank you|Subscribe|Like|Please subscribe|See you next time)[.!]?$",
+    r"^don't forget to (like|subscribe|comment).*$",
+    r"^hit the (like|subscribe|notification|bell).*$",
+    r"^smash (the|that) (like|subscribe).*$",
+    r"^leave a (like|comment).*$",
+    r"^click the (subscribe|bell|link).*$",
+    r"^check out (my|our|the) (channel|video|link).*$",
+    r"^follow (me|us) on.*$",
+    r"^see you in the next (one|video|episode)\.?$",
+    r"^until next time\.?$",
+    r"^peace\.?$",
+    r"^take care\.?$",
+    r"^have a (good|nice|great) (day|one)\.?$",
+    r"^stay tuned\.?$",
+    r"^watch more videos\.?$",
+    r"^more videos coming soon\.?$",
+    r"^new video every.*$",
+    r"^upload.*every.*$",
+    
+    # ========== 영어 자막/편집 크레딧 (핵심 필터) ==========
+    r".*subtitl(e|ed|ing|es)?\s*(by|:).*",
+    r".*transcrib(e|ed|ing|es)?\s*(by|:).*",
+    r".*edit(ed|ing|or|s)?\s*(by|:).*",
+    r".*translat(e|ed|ing|ion|or|s)?\s*(by|:).*",
+    r".*caption(ed|s|ing)?\s*(by|:).*",
+    r".*creat(e|ed|ing|or|s)?\s*(by|:).*",
+    r".*produc(e|ed|ing|er|tion)?\s*(by|:).*",
+    r".*direct(ed|or|ing)?\s*(by|:).*",
+    r".*writt(en|ing)?\s*(by|:).*",
+    r".*narrat(e|ed|ing|or)?\s*(by|:).*",
+    r".*present(ed|ing|er)?\s*(by|:).*",
+    r".*host(ed|ing)?\s*(by|:).*",
+    r".*powered\s*by.*",
+    r".*sponsored\s*by.*",
+    r".*brought\s*to\s*you\s*by.*",
+    r".*made\s*(possible\s*)?\s*by.*",
+    r".*courtesy\s*of.*",
+    r".*copyright.*",
+    r".*©.*",
+    r".*all\s*rights\s*reserved.*",
     r"^[a-zA-Z]{2,}( [a-zA-Z]{2,}){0,4}[.!]?$",  # 짧은 영어 문장
     
-    # ========== 한국어 할루시네이션 ==========
+    # ========== 영어 기타 패턴 ==========
+    r"^(okay|ok|yes|no|um|uh|oh|ah|hmm|huh|well|so|like|you know)\.?$",
+    r"^(i mean|basically|actually|literally|honestly)\.?$",
+    r"^one moment( please)?\.?$",
+    r"^just a (moment|second|sec)\.?$",
+    r"^hold on\.?$",
+    r"^wait\.?$",
+    r"^let me (see|think|check)\.?$",
+    r"^what\?$",
+    r"^sorry\??$",
+    r"^excuse me\??$",
+    r"^pardon\??$",
+    r"^right\.?$",
+    r"^exactly\.?$",
+    r"^indeed\.?$",
+    r"^absolutely\.?$",
+    r"^definitely\.?$",
+    r"^of course\.?$",
+    r"^sure\.?$",
+    r"^anyway(s)?\.?$",
+    r"^moving on\.?$",
+    r"^next\.?$",
+    r"^and\.{0,3}$",
+    r"^but\.{0,3}$",
+    r"^so\.{0,3}$",
+    r"^now\.{0,3}$",
+    r"^then\.{0,3}$",
+    r"^here\.{0,3}$",
+    r"^there\.{0,3}$",
+    
+    # ==========================================================================
+    # ★★★ 한국어 할루시네이션 (YouTube/영상 관련) ★★★
+    # ==========================================================================
     r"^구독.*좋아요.*눌러.*$",
     r"^시청해\s*주셔서\s*감사합니다\.?$",
     r"^감사합니다\.?$",
     r"^다음에\s*봐요\.?$",
     r"^안녕히\s*계세요\.?$",
-    r"^구독(과)? 좋아요( 부탁드립니다)?$",
-    r"^좋아요(와)? 구독( 부탁드립니다)?$",
-    r"^채널을 구독해 주세요\.?$",
-    r"^다음에 또 만나요\.?$",
+    r"^구독(과)? 좋아요( 부탁드립니다)?\.?$",
+    r"^좋아요(와|랑)? 구독( 부탁드립니다)?\.?$",
+    r"^채널을?\s*구독해?\s*주세요\.?$",
+    r"^다음에\s*또\s*만나요\.?$",
     r"^안녕하세요\.?$",
     r"^헬로우(\.|\!)?$",
+    r".*구독.*알림\s*설정.*",
+    r".*좋아요.*눌러.*",
+    r".*구독\s*버튼.*",
+    r".*알림\s*버튼.*",
+    r".*종\s*모양.*",
+    r".*댓글.*남겨.*",
+    r".*영상.*끝까지.*봐.*",
+    r".*채널.*방문.*",
+    r".*링크.*확인.*",
+    r"^다음\s*영상에서\s*만나(요|겠습니다|보겠습니다)?\.?$",
+    r"^다음\s*시간에\s*만나(요|겠습니다)?\.?$",
+    r"^다음\s*편에서\s*(만나요|봐요|뵙겠습니다)?\.?$",
+    r"^영상\s*봐\s*주셔서\s*감사합니다\.?$",
+    r"^시청\s*감사합니다\.?$",
+    r"^끝까지\s*시청해\s*주셔서\s*감사합니다\.?$",
+    r"^오늘\s*영상은\s*여기까지(입니다|예요)?\.?$",
+    r"^오늘은\s*여기까지(입니다|예요)?\.?$",
+    r"^여기까지(입니다|예요)?\.?$",
+    r"^좋은\s*하루\s*(되세요|보내세요)\.?$",
+    r"^좋은\s*밤\s*(되세요|보내세요)\.?$",
+    r"^행복한\s*하루\s*(되세요|보내세요)\.?$",
+    r"^즐거운\s*(하루|시간)\s*(되세요|보내세요)\.?$",
     
-    # ========== 중국어/일본어 할루시네이션 ==========
-    r"^谢谢.*$",
-    r"^ありがとう.*$",
-    r"^[\u4e00-\u9fff]{2,}$",  # 중국어 문자만
-    r"^[\u3040-\u30ff]{2,}$",  # 일본어 문자만
-    r"^(谢谢|你好|再见|こんにちは|ありがとう|こんばんは)$",
+    # ==========================================================================
+    # ★★★ 한국어 자막/편집 크레딧 (핵심 필터) ★★★
+    # ==========================================================================
+    r".*자막\s*(제작|편집|번역|감수)\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*자막\s*[:|-]\s*[가-힣a-zA-Z]+.*",
+    r".*편집\s*(자|자막|영상)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*편집자\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*영상\s*편집\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*번역\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*번역자\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*감수\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*제작\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*촬영\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*연출\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*기획\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*진행\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*나레이션\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*성우\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*해설\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*출연\s*(자)?\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*협찬\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*후원\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*스폰서\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*제공\s*[:|-]?\s*[가-힣a-zA-Z]+.*",
+    r".*저작권\s*[:|-]?\s*.*",
+    r".*ⓒ.*",
+    r".*무단\s*(복제|전재|배포)\s*(금지)?.*",
+    r".*all\s*rights?\s*reserved.*",
     
-    # ========== 특수 문자/기호 ==========
-    r"^[\s\.\,\!\?\-\~\♪\♫\🎵\🎶\…]+$",
-    r"^\.{2,}$",  # 마침표만 반복
-    r"^\s*$",     # 공백만
-    
-    # ========== 자막 관련 ==========
+    # ========== 한국어 자막 단독 문구 ==========
     r"^자막.*$",
     r"^subtitle.*$",
     r"^caption.*$",
+    r"^자막\s*[가-힣]{2,4}$",
+    r"^편집\s*[가-힣]{2,4}$",
+    r"^번역\s*[가-힣]{2,4}$",
+    r"^[가-힣]{2,4}\s*자막$",
+    r"^[가-힣]{2,4}\s*편집$",
+    r"^[가-힣]{2,4}\s*번역$",
     
-    # ========== 무음/배경음 (GPT-4.1 추가) ==========
-    r"^음성 없음$",
-    r"^무음$",
-    r"^박수( 소리)?$",
-    r"^환호( 소리)?$",
-    r"^음악( 소리)?$",
-    r"^테스트(입니다)?$",
-    r"^(마이크 테스트)+$",
+    # ==========================================================================
+    # ★★★ 한국어 일반 할루시네이션 ★★★
+    # ==========================================================================
+    r"^(네|예)\.?$",
+    r"^(네|예),?\s*알겠습니다\.?$",
+    r"^(네|예),?\s*감사합니다\.?$",
+    r"^(네|예),?\s*이상입니다\.?$",
+    r"^이상입니다\.?$",
+    r"^(이|그|저)것은(요)?$",
+    r"^이상으로\s*마치겠습니다\.?$",
+    r"^(네|예),?\s*잠시만(요)?\.?$",
+    r"^(네|예),?\s*잠깐만(요)?\.?$",
+    r"^(네|예),?\s*준비가?\s*(되었습니다|됐습니다)\.?$",
+    r"^(네|예),?\s*준비\s*중(입니다)?\.?$",
+    r"^(네|예),?\s*연결(이|이요)?\s*(되었습니다|됐습니다|끊겼습니다)\.?$",
+    r"^(네|예),?\s*연결\s*중(입니다)?\.?$",
     
-    # ========== 반복 패턴 (GPT-4.1 추가) ==========
-    r"^(네|예) (네|예) (네|예)\.?$",
+    # ========== 한국어 짧은 응답/추임새 ==========
+    r"^아\.?$",
+    r"^어\.?$",
+    r"^음\.?$",
+    r"^응\.?$",
+    r"^네\.?$",
+    r"^예\.?$",
+    r"^뭐\.?$",
+    r"^왜\.?$",
+    r"^뭐요\??$",
+    r"^왜요\??$",
+    r"^그래(요)?\.?$",
+    r"^그렇죠\.?$",
+    r"^그러니까(요)?\.?$",
+    r"^그러게(요)?\.?$",
+    r"^맞아(요)?\.?$",
+    r"^정말(요)?\??$",
+    r"^진짜(요)?\??$",
+    r"^그러네(요)?\.?$",
+    r"^아니(요)?\.?$",
+    r"^글쎄(요)?\.?$",
+    r"^잠깐(만)?(요)?\.?$",
+    r"^잠시(만)?(요)?\.?$",
+    r"^저기(요)?\.?$",
+    r"^여기(요)?\.?$",
+    r"^거기(요)?\.?$",
+    
+    # ========== 한국어 의미없는 문장 조각 ==========
+    r"^것처럼\.?$",
+    r"^것\s*같습니다\.?$",
+    r"^있는\s*겁니다\.?$",
+    r"^되겠습니다\.?$",
+    r"^것입니다\.?$",
+    r"^합니다\.?$",
+    r"^입니다\.?$",
+    r"^습니다\.?$",
+    r"^니다\.?$",
+    r"^데요\.?$",
+    r"^거든요\.?$",
+    r"^잖아요\.?$",
+    r"^인데(요)?\.?$",
+    r"^라고(요)?\.?$",
+    r"^니까(요)?\.?$",
+    r"^지만(요)?\.?$",
+    r"^그래서(요)?\.?$",
+    r"^그런데(요)?\.?$",
+    r"^그리고(요)?\.?$",
+    r"^하지만(요)?\.?$",
+    r"^그러면(요)?\.?$",
+    r"^그러나(요)?\.?$",
+    r"^많은\.?$",
+    r"^3회\.?$",
+    r"^이\s*시각\s*세계였습니다\.?$",
+    
+    # ==========================================================================
+    # ★★★ 반복 패턴 ★★★
+    # ==========================================================================
+    r"^(네|예)(\s*(네|예)){2,}\.?$",
     r"^(음|어|음음|어어)+$",
     r"^(네네네|예예예|네네|예예)+$",
     r"^(아아아|어어어|음음음)+$",
+    r"^(하하|히히|호호|허허|후후)+$",
+    r"^(ㅎㅎ|ㅋㅋ|ㅎㅎㅎ|ㅋㅋㅋ)+$",
+    r"^(.)\1{3,}$",  # 같은 글자 4회 이상 반복
+    r"^(.{2,5})\s*\1(\s*\1)*$",  # 같은 문구 반복
     
-    # ========== 국회/회의 관련 (GPT-4.1 추가) ==========
-    r"^(네|예)\.?$",
-    r"^(네|예),? 알겠습니다\.?$",
-    r"^(네|예),? 감사합니다\.?$",
-    r"^(네|예),? 이상입니다\.?$",
-    r"^이상입니다\.?$",
-    r"^(이|그|저)것은(요)?$",
-    r"^이상으로 마치겠습니다\.?$",
+    # ==========================================================================
+    # ★★★ 중국어 할루시네이션 ★★★
+    # ==========================================================================
+    r"^谢谢.*$",
+    r"^[\u4e00-\u9fff]{2,15}$",  # 중국어 문자만 (2~15자)
+    r"^(谢谢|你好|再见|请|是的|好的|对|不是|没有|可以|谢谢观看|订阅|点赞).*$",
+    r".*感谢\s*收看.*",
+    r".*感谢\s*观看.*",
+    r".*请\s*订阅.*",
+    r".*请\s*点赞.*",
+    r".*字幕\s*[:：].*",
+    r".*翻译\s*[:：].*",
+    r".*编辑\s*[:：].*",
+    r".*制作\s*[:：].*",
     
-    # ========== 연결/준비 상태 (GPT-4.1 추가) ==========
-    r"^(네|예),? 잠시만요\.?$",
-    r"^(네|예),? 잠깐만요\.?$",
-    r"^(네|예),? 준비가 되었습니다\.?$",
-    r"^(네|예),? 준비됐습니다\.?$",
-    r"^(네|예),? 준비 중입니다\.?$",
-    r"^(네|예),? 연결이 되었습니다\.?$",
-    r"^(네|예),? 연결 중입니다\.?$",
-    r"^(네|예),? 연결이 끊겼습니다\.?$",
+    # ==========================================================================
+    # ★★★ 일본어 할루시네이션 ★★★
+    # ==========================================================================
+    r"^ありがとう.*$",
+    r"^[\u3040-\u30ff]{2,15}$",  # 히라가나/가타카나만 (2~15자)
+    r"^(こんにちは|こんばんは|おはよう|さようなら|ありがとう|はい|いいえ|そうです|そうですね).*$",
+    r".*ご視聴.*ありがとう.*",
+    r".*チャンネル登録.*",
+    r".*高評価.*",
+    r".*字幕\s*[:：].*",
+    r".*翻訳\s*[:：].*",
+    r".*編集\s*[:：].*",
+    r".*制作\s*[:：].*",
+    
+    # ==========================================================================
+    # ★★★ 특수 문자/기호 ★★★
+    # ==========================================================================
+    r"^[\s\.\,\!\?\-\~\♪\♫\🎵\🎶\…\*\#\@\&\%\$\^\=\+\_\|\\\[\]\{\}\<\>\'\"\`]+$",
+    r"^\.{2,}$",
+    r"^\s*$",
+    r"^[-_=+*#@!?.,;:]{2,}$",
+    r"^\(.*\)$",  # 괄호만 있는 텍스트
+    r"^\[.*\]$",  # 대괄호만 있는 텍스트
+    r"^「.*」$",
+    r"^『.*』$",
+    r"^《.*》$",
+    r"^【.*】$",
+    
+    # ==========================================================================
+    # ★★★ 무음/배경음/효과음 ★★★
+    # ==========================================================================
+    r"^음성\s*없음\.?$",
+    r"^무음\.?$",
+    r"^침묵\.?$",
+    r"^(박수|환호|음악|웃음|울음|탄성|한숨|기침|재채기|딸꾹질)(\s*소리)?\.?$",
+    r"^박수\s*갈채\.?$",
+    r"^배경\s*음악\.?$",
+    r"^배경음\.?$",
+    r"^효과음\.?$",
+    r"^잡음\.?$",
+    r"^소음\.?$",
+    r"^테스트(입니다)?\.?$",
+    r"^마이크\s*테스트\.?$",
+    r"^사운드\s*테스트\.?$",
+    r"^음성\s*테스트\.?$",
+    r"^\[음악\]$",
+    r"^\[박수\]$",
+    r"^\[웃음\]$",
+    r"^\[침묵\]$",
+    r"^\(음악\)$",
+    r"^\(박수\)$",
+    r"^\(웃음\)$",
+    r"^\(침묵\)$",
+    r"^♪.*♪$",
+    r"^🎵.*🎵$",
+    
+    # ==========================================================================
+    # ★★★ 기타 일반 할루시네이션 ★★★
+    # ==========================================================================
+    # 회의/방송 관련
+    r"^화면이?\s*전환(됩니다|되었습니다)?\.?$",
+    r"^영상이?\s*시작(됩니다|되었습니다)?\.?$",
+    r"^영상이?\s*종료(됩니다|되었습니다)?\.?$",
+    r"^방송이?\s*시작(됩니다|되었습니다)?\.?$",
+    r"^방송이?\s*종료(됩니다|되었습니다)?\.?$",
+    r"^잠시\s*후에?\s*(계속됩니다|돌아오겠습니다)\.?$",
+    r"^잠시\s*후\.?$",
+    r"^광고\s*후에?\s*(계속됩니다|돌아오겠습니다)\.?$",
+    
+    # 숫자/시간 단독
+    r"^\d+\.?$",
+    r"^\d+:\d+\.?$",
+    r"^\d+분\.?$",
+    r"^\d+초\.?$",
+    r"^\d+시\.?$",
+    
+    # 문장부호/이모지 단독
+    r"^[\!\?\.]+$",
+    r"^[\u2600-\u26FF\u2700-\u27BF\U0001F300-\U0001F9FF]+$",  # 이모지만
+    
+    # 기타 무의미 패턴
+    r"^[ㄱ-ㅎㅏ-ㅣ]+$",  # 자음/모음만
+    r"^[a-zA-Z]$",  # 단일 알파벳
+    r"^[가-힣]$",  # 단일 한글
+    
+    # ==========================================================================
+    # ★★★ 팟캐스트/라디오 관련 ★★★
+    # ==========================================================================
+    r".*청취해\s*주셔서\s*감사.*",
+    r".*들어주셔서\s*감사.*",
+    r".*애청자\s*여러분.*",
+    r".*시청자\s*여러분.*",
+    r".*구독자\s*여러분.*",
+    r".*청취자\s*여러분.*",
+    r"^이\s*시간\s*마치겠습니다\.?$",
+    r"^지금까지\s*.*였습니다\.?$",
+    r"^다음\s*시간에\s*뵙겠습니다\.?$",
+    r"^다음\s*주에\s*(만나요|뵙겠습니다)\.?$",
+    
+    # ==========================================================================
+    # ★★★ 일반적인 묵음 구간 할루시네이션 ★★★
+    # ==========================================================================
+    r"^\.{3,}$",  # 말줄임표
+    r"^-{3,}$",   # 대시 반복
+    r"^_{3,}$",   # 밑줄 반복
+    r"^~{2,}$",   # 물결 반복
+    r"^\*{2,}$",  # 별표 반복
+    
+    # ==========================================================================
+    # ★★★ 스페인어/프랑스어/독일어 할루시네이션 ★★★
+    # ==========================================================================
+    r"^(gracias|hola|adiós|por favor|sí|no)\.?$",
+    r"^(merci|bonjour|au revoir|s'il vous plaît|oui|non)\.?$",
+    r"^(danke|hallo|auf wiedersehen|bitte|ja|nein)\.?$",
+    r".*subtítulos\s*por.*",
+    r".*sous-titres\s*par.*",
+    r".*untertitel\s*von.*",
+    
+    # ==========================================================================
+    # ★★★ 추가 한국어 뉴스/방송 할루시네이션 ★★★
+    # ==========================================================================
+    r"^지금까지\s*.+\s*기자였습니다\.?$",
+    r"^.+\s*기자의\s*보도였습니다\.?$",
+    r"^.+에서\s*전해드렸습니다\.?$",
+    r"^뉴스였습니다\.?$",
+    r"^보도였습니다\.?$",
+    r"^속보입니다\.?$",
+    r"^긴급\s*속보\.?$",
+    r"^.+\s*아나운서였습니다\.?$",
+    r"^앵커였습니다\.?$",
+    r"^이상\s*.+\s*뉴스였습니다\.?$",
 ]
 
-# [advice from AI] 컴파일된 패턴 - 동적 업데이트 지원
+# [advice from AI] 컴파일된 패턴 - 동적 업데이트 지원 (JSON 파일 포함)
 _compiled_patterns_cache = None
 _patterns_version = 0
+_json_patterns_mtime = 0  # JSON 파일 수정 시간 추적
+
+# [advice from AI] JSON 데이터 파일 경로
+import os as _os
+_DATA_FILE = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data", "stt_dictionaries.json")
+
+# [advice from AI] JSON 사전 캐시 (파일 수정 시간 기반 갱신)
+_json_data_cache = None
+_json_data_mtime = 0
+
+def _load_json_data():
+    """JSON 파일에서 전체 사전 데이터 로드 (캐싱 포함)"""
+    global _json_data_cache, _json_data_mtime
+    
+    try:
+        current_mtime = _os.path.getmtime(_DATA_FILE)
+    except OSError:
+        current_mtime = 0
+    
+    # 캐시가 유효하면 반환
+    if _json_data_cache is not None and _json_data_mtime == current_mtime:
+        return _json_data_cache
+    
+    try:
+        import json
+        with open(_DATA_FILE, 'r', encoding='utf-8') as f:
+            _json_data_cache = json.load(f)
+            _json_data_mtime = current_mtime
+            logger.info(f"🔄 JSON 사전 데이터 로드: {_DATA_FILE}")
+            return _json_data_cache
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"⚠️ JSON 사전 데이터 로드 실패: {e}")
+        return {}
+
+def _load_json_hallucination_patterns():
+    """JSON 파일에서 할루시네이션 패턴 로드"""
+    data = _load_json_data()
+    return data.get('hallucination', [])
+
+def _load_json_profanity():
+    """JSON 파일에서 비속어 패턴 로드"""
+    data = _load_json_data()
+    return data.get('profanity', [])
+
+def _load_json_abbreviations():
+    """JSON 파일에서 약어 사전 로드 (key-value 형태)"""
+    data = _load_json_data()
+    items = data.get('abbreviations', [])
+    result = {}
+    for item in items:
+        if isinstance(item, dict) and 'key' in item and 'value' in item:
+            result[item['key']] = item['value']
+    return result
+
+def _load_json_proper_nouns():
+    """JSON 파일에서 고유명사 사전 로드"""
+    data = _load_json_data()
+    items = data.get('proper_nouns', [])
+    result = {}
+    for item in items:
+        if isinstance(item, dict) and 'key' in item and 'value' in item:
+            result[item['key']] = item['value']
+    return result
+
+def _load_json_government_dict():
+    """JSON 파일에서 정부 용어 사전 로드"""
+    data = _load_json_data()
+    items = data.get('government_dict', [])
+    result = {}
+    for item in items:
+        if isinstance(item, dict) and 'key' in item and 'value' in item:
+            result[item['key']] = item['value']
+    return result
 
 def _get_compiled_patterns():
-    """런타임에 추가된 패턴도 포함하여 컴파일"""
-    global _compiled_patterns_cache, _patterns_version
-    current_version = len(HALLUCINATION_PATTERNS)
+    """런타임에 추가된 패턴도 포함하여 컴파일 (JSON 파일 패턴 포함)"""
+    global _compiled_patterns_cache, _patterns_version, _json_patterns_mtime
     
-    if _compiled_patterns_cache is None or _patterns_version != current_version:
-        _compiled_patterns_cache = [re.compile(p, re.IGNORECASE) for p in HALLUCINATION_PATTERNS]
+    # [advice from AI] JSON 파일 수정 시간 확인
+    try:
+        current_mtime = _os.path.getmtime(_DATA_FILE)
+    except OSError:
+        current_mtime = 0
+    
+    # 정적 패턴 + JSON 패턴 병합
+    json_patterns = _load_json_hallucination_patterns()
+    all_patterns = list(HALLUCINATION_PATTERNS) + [p for p in json_patterns if p not in HALLUCINATION_PATTERNS]
+    current_version = len(all_patterns)
+    
+    # 캐시 갱신 조건: 패턴 수 변경 또는 JSON 파일 수정
+    if (_compiled_patterns_cache is None or 
+        _patterns_version != current_version or 
+        _json_patterns_mtime != current_mtime):
+        
+        _compiled_patterns_cache = []
+        for p in all_patterns:
+            try:
+                _compiled_patterns_cache.append(re.compile(p, re.IGNORECASE))
+            except re.error as e:
+                logger.warning(f"⚠️ 잘못된 정규식 패턴 스킵: {p} - {e}")
+        
         _patterns_version = current_version
-        logger.info(f"🔄 할루시네이션 패턴 재컴파일: {current_version}개")
+        _json_patterns_mtime = current_mtime
+        logger.info(f"🔄 할루시네이션 패턴 재컴파일: 정적 {len(HALLUCINATION_PATTERNS)}개 + JSON {len(json_patterns)}개 = 총 {len(_compiled_patterns_cache)}개")
     
     return _compiled_patterns_cache
 
@@ -991,7 +1432,7 @@ NUMBER_PATTERNS = [
 
 def apply_dictionary_mapping(text: str, apply_government_dict: bool = True) -> str:
     """
-    사전 매칭 적용
+    사전 매칭 적용 (정적 사전 + JSON 사전 병합)
     
     - 약어 변환 (아이엠에프 → IMF)
     - 숫자 변환 (백만원 → 1,000,000원)
@@ -1010,21 +1451,44 @@ def apply_dictionary_mapping(text: str, apply_government_dict: bool = True) -> s
     
     result = text
     
+    # [advice from AI] ★ JSON 사전 로드 (관리 페이지에서 설정한 데이터)
+    json_proper_nouns = _load_json_proper_nouns()
+    json_abbreviations = _load_json_abbreviations()
+    json_government_dict = _load_json_government_dict()
+    
     # [advice from AI] 0. 국회/국무회의 오인식 교정 (먼저 적용)
     if apply_government_dict:
+        # 정적 사전 적용
         for wrong, correct in GOVERNMENT_CORRECTION_DICT.items():
             pattern = re.compile(re.escape(wrong), re.IGNORECASE)
             result = pattern.sub(correct, result)
+        # [advice from AI] ★ JSON 정부 용어 사전 적용
+        for wrong, correct in json_government_dict.items():
+            if wrong not in GOVERNMENT_CORRECTION_DICT:  # 중복 방지
+                pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+                result = pattern.sub(correct, result)
     
     # [advice from AI] 0.5. 고유명사 사전 적용 (인명/기관명/지명)
+    # 정적 사전 적용
     for wrong, correct in PROPER_NOUN_DICT.items():
         pattern = re.compile(re.escape(wrong), re.IGNORECASE)
         result = pattern.sub(correct, result)
+    # [advice from AI] ★ JSON 고유명사 사전 적용
+    for wrong, correct in json_proper_nouns.items():
+        if wrong not in PROPER_NOUN_DICT:  # 중복 방지
+            pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+            result = pattern.sub(correct, result)
     
     # 1. 약어 변환 (대소문자 무시)
+    # 정적 사전 적용
     for korean, english in ABBREVIATION_DICT.items():
         pattern = re.compile(re.escape(korean), re.IGNORECASE)
         result = pattern.sub(english, result)
+    # [advice from AI] ★ JSON 약어 사전 적용
+    for korean, english in json_abbreviations.items():
+        if korean not in ABBREVIATION_DICT:  # 중복 방지
+            pattern = re.compile(re.escape(korean), re.IGNORECASE)
+            result = pattern.sub(english, result)
     
     # 2. 숫자 패턴 변환
     for pattern, replacement in NUMBER_PATTERNS:

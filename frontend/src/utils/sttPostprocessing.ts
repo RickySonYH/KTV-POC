@@ -176,7 +176,109 @@ const DEFAULT_HALLUCINATION_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * [advice from AI] ★ 자연스럽게 반복될 수 있는 단어 (Python HallucinationDetector 포팅)
+ * 반복 패턴 감지에서 제외
+ */
+const NATURAL_REPEAT_WORDS = new Set([
+  '그', '이', '그런', '이런', '그거', '이거', '그게', '이게', '그냥', '이제',
+  '다', '더', '또', '같은', '같이', '처럼', '하게', '하는', '되는', '있는',
+  '것', '거', '게', '걸', '건', '겠', '고', '을', '를', '에', '의', '은', '는',
+  '그래서', '그러니까', '그런데', '그러면', '그리고', '그런', '그러한',
+  '저희', '저기', '여기', '거기', '이거', '그거', '저거', '이런', '그런', '저런',
+  '뭐', '어', '음', '그', '네', '예', '응', '어음', '아음',
+  '혹시라도', '혹시', '만약', '만약에', '아마', '아마도', '어쩌면',
+  '일단', '일단은', '그냥', '그냥은', '그러면', '그러니까', '그런데',
+  '안', '못', '마', '말', '좀', '조금', '잠깐', '잠시', '제발', '꼭',
+]);
+
+/**
+ * [advice from AI] ★ 개선된 반복 패턴 감지 (Python HallucinationDetector._has_repetitive_pattern_improved 포팅)
+ */
+function hasRepetitivePattern(text: string): { isRepetitive: boolean; type: string; count: number } {
+  const result = { isRepetitive: false, type: '', count: 0 };
+  
+  if (text.length < 4) return result;
+  
+  // 1. 같은 글자가 5번 이상 연속 반복
+  const charRepeatThreshold = 5;
+  for (let i = 0; i <= text.length - charRepeatThreshold; i++) {
+    const char = text[i];
+    // 공백과 숫자는 제외
+    if (char !== ' ' && !/\d/.test(char)) {
+      let repeatCount = 1;
+      for (let j = i + 1; j < text.length; j++) {
+        if (text[j] === char) {
+          repeatCount++;
+        } else {
+          break;
+        }
+      }
+      if (repeatCount >= charRepeatThreshold) {
+        return { isRepetitive: true, type: 'char', count: repeatCount };
+      }
+    }
+  }
+  
+  // 2. 구문(phrase) 반복 패턴 감지
+  const words = text.split(/\s+/);
+  if (words.length >= 6) {
+    for (let phraseLen = 2; phraseLen < Math.min(6, Math.floor(words.length / 2) + 1); phraseLen++) {
+      const phraseCounts: Record<string, number> = {};
+      for (let i = 0; i <= words.length - phraseLen; i++) {
+        const phrase = words.slice(i, i + phraseLen).join(' ');
+        const phraseKey = phrase.replace(/[.,!?]/g, '').toLowerCase();
+        
+        // 5글자 이상 구문만 카운트
+        if (phraseKey.replace(/\s/g, '').length >= 5) {
+          phraseCounts[phraseKey] = (phraseCounts[phraseKey] || 0) + 1;
+        }
+      }
+      
+      // 5번 이상 반복되면 할루시네이션
+      for (const [phrase, count] of Object.entries(phraseCounts)) {
+        if (count >= 5 && !['그런데', '그래서', '그러니까', '그리고', '하지만'].includes(phrase)) {
+          return { isRepetitive: true, type: 'phrase', count };
+        }
+      }
+    }
+  }
+  
+  // 3. 같은 단어가 3번 이상 연속 반복 (자연스러운 단어 제외)
+  if (words.length >= 3) {
+    for (let i = 0; i < words.length - 2; i++) {
+      const word = words[i].replace(/[.,!?]/g, '');
+      if (word.length >= 3 && !NATURAL_REPEAT_WORDS.has(word)) {
+        if (words[i + 1].replace(/[.,!?]/g, '') === word && 
+            words[i + 2].replace(/[.,!?]/g, '') === word) {
+          return { isRepetitive: true, type: 'word', count: 3 };
+        }
+      }
+    }
+  }
+  
+  // 4. 문장 반복 패턴 감지
+  const sentences = text.split(/[.!?]/).filter(s => s.trim().length >= 10);
+  if (sentences.length >= 2) {
+    const sentenceCounts: Record<string, number> = {};
+    for (const sentence of sentences) {
+      const key = sentence.trim();
+      sentenceCounts[key] = (sentenceCounts[key] || 0) + 1;
+    }
+    
+    // 같은 문장이 3번 이상 반복
+    for (const [, count] of Object.entries(sentenceCounts)) {
+      if (count >= 3) {
+        return { isRepetitive: true, type: 'sentence', count };
+      }
+    }
+  }
+  
+  return result;
+}
+
+/**
  * 할루시네이션 여부 확인 (로그 최소화)
+ * [advice from AI] Python HallucinationDetector 로직 통합
  */
 export function isHallucination(text: string): boolean {
   if (!text) return true;
@@ -190,7 +292,14 @@ export function isHallucination(text: string): boolean {
   const meaninglessShortWords = ['네네', '예예', '음음', '어어', '아아', '네에', '예에'];
   if (meaninglessShortWords.includes(trimmed)) return true;
 
-  // 3. 백엔드에서 가져온 할루시네이션 패턴 체크
+  // [advice from AI] ★ 3. 개선된 반복 패턴 감지 (Python 로직 포팅)
+  const repetition = hasRepetitivePattern(trimmed);
+  if (repetition.isRepetitive) {
+    console.log(`[HALLUCINATION] 🔁 반복 패턴 감지 (${repetition.type} ×${repetition.count}): "${trimmed.substring(0, 40)}..."`);
+    return true;
+  }
+
+  // 4. 백엔드에서 가져온 할루시네이션 패턴 체크
   for (const patternStr of cachedHallucinationPatterns) {
     try {
       const pattern = new RegExp(patternStr, 'i');
@@ -200,12 +309,12 @@ export function isHallucination(text: string): boolean {
     }
   }
 
-  // 4. 기본 할루시네이션 패턴 체크
+  // 5. 기본 할루시네이션 패턴 체크
   for (const pattern of DEFAULT_HALLUCINATION_PATTERNS) {
     if (pattern.test(trimmed)) return true;
   }
 
-  // 5. 동일 단어 반복 (3회 이상)
+  // 6. 동일 단어 반복 (3회 이상) - 기존 로직 유지
   const words = trimmed.split(/\s+/);
   if (words.length >= 3) {
     for (let i = 0; i < words.length - 2; i++) {
@@ -215,7 +324,7 @@ export function isHallucination(text: string): boolean {
     }
   }
 
-  // 6. 모든 단어가 동일
+  // 7. 모든 단어가 동일
   if (words.length >= 2) {
     const uniqueWords = new Set(words);
     if (uniqueWords.size === 1) return true;
@@ -446,44 +555,444 @@ export function maskSensitiveInfo(text: string): string {
 }
 
 /**
+ * [advice from AI] ★ 침묵 구간 할루시네이션 패턴 (Python HallucinationDetector 포팅)
+ * STT 엔진이 침묵에서 반복 생성하는 패턴
+ */
+const SILENCE_HALLUCINATION_PATTERNS: RegExp[] = [
+  // 단어 반복 패턴
+  /다진마늘\s*다진마늘/i,
+  /롤러스\s*롤러스/i,
+  /면을\s*잘게\s*잘라줍니다\.\s*면을\s*잘게\s*잘라줍니다\./i,
+  // 단일 문자 반복 패턴
+  /^(아\s*){3,}$/i,
+  /^(어\s*){3,}$/i,
+  /^(음\s*){3,}$/i,
+  /^(그\s*){3,}$/i,
+  // 구두점 반복 패턴
+  /^\.\s*\.\s*\.$/i,
+  /^,\s*,\s*,$/i,
+  /^\?\s*\?\s*\?$/i,
+  /^!\s*!\s*!$/i,
+];
+
+/**
+ * [advice from AI] ★ 방송 뉴스 할루시네이션 패턴 (Python HallucinationDetector 포팅)
+ */
+const BROADCAST_HALLUCINATION_PATTERNS: RegExp[] = [
+  /MBC\s*뉴스/i,
+  /KBS\s*뉴스/i,
+  /SBS\s*뉴스/i,
+  /JTBC\s*뉴스/i,
+  /YTN\s*뉴스/i,
+  /뉴스\s*(김성현|이덕영)입니다/i,
+  /기상캐스터/i,
+  /기자가\s*보도합니다/i,
+  /에서\s*MBC\s*뉴스/i,
+  /투데이\s*이슈톡이었습니다/i,
+  /날씨였습니다/i,
+  /뉴스\s*스토리/i,
+  /지금까지\s*뉴스\s*스토리였습니다/i,
+  /지금까지\s*뉴스/i,
+  /뉴스\s*마무리/i,
+  /오늘\s*뉴스/i,
+  /뉴스\s*시간/i,
+  /뉴스데스크/i,
+  /촬영기자1호/i,
+  /이\s*시각/i,
+  /세계였습니다/i,
+  /이\s*시각\s*세계였습니다/i,
+  /이상\s*세계였습니다/i,
+  /지금까지\s*세계였습니다/i,
+  /세계\s*뉴스/i,
+  /국제\s*뉴스/i,
+  /해외\s*뉴스/i,
+];
+
+/**
+ * [advice from AI] ★ 종교적 표현 할루시네이션 패턴 (Python HallucinationDetector 포팅)
+ */
+const RELIGIOUS_HALLUCINATION_PATTERNS: RegExp[] = [
+  /^아멘\.?$/i,
+  /^할렐루야\.?$/i,
+  /^하나님\.?$/i,
+  /^주님\.?$/i,
+  /기도합니다\.?$/i,
+  /축복합니다\.?$/i,
+  /^은혜\.?$/i,
+  /감사드립니다\.?$/i,
+  /주\s*예수님/i,
+  /하느님/i,
+  /천주님/i,
+];
+
+/**
+ * [advice from AI] ★ 방송인 이름 할루시네이션 패턴 (Python HallucinationDetector 포팅)
+ */
+const BROADCASTER_NAME_PATTERNS: RegExp[] = [
+  /기상캐스터\s*배혜지/i,
+  /배혜지/i,
+  /김성현입니다/i,
+  /이덕영입니다/i,
+  /아나운서/i,
+  /앵커/i,
+  /리포터/i,
+  /캐스터/i,
+  /날씨\s*전문가/i,
+  /기상\s*전문가/i,
+  /일기예보/i,
+  /날씨\s*예보/i,
+  /뉴스\s*진행/i,
+  /뉴스\s*앵커/i,
+  /메인\s*앵커/i,
+  /보도\s*앵커/i,
+];
+
+/**
+ * [advice from AI] ★ 한국어 간투사/감탄사 할루시네이션 패턴 (Python HallucinationDetector 포팅)
+ */
+const KOREAN_INTERJECTION_PATTERNS: RegExp[] = [
+  /^음\.?$/i,
+  /^어어\.?$/i,
+  /^음음\.?$/i,
+  /^그그\.?$/i,
+  /^음\s*음$/i,
+  /^어\s*어$/i,
+  /^그\s*그$/i,
+  /^뭐\s*뭐$/i,
+  /^아\s*아$/i,
+  /^어음$/i,
+  /^음어$/i,
+  /^실례합니다\.?$/i,
+  /^죄송해요\.?$/i,
+];
+
+/**
  * [advice from AI] 강력한 할루시네이션 패턴 - 길이와 관계없이 항상 필터
- * Whisper 모델이 자주 생성하는 명확한 오류
+ * Whisper 모델이 자주 생성하는 명확한 오류 - 대규모 확장
  */
 const STRONG_HALLUCINATION_PATTERNS: RegExp[] = [
-  /시청.*감사/i,       // "시청해주셔서 감사합니다" 등
-  /구독.*좋아요/i,     // "구독과 좋아요" 등
+  // ==========================================================================
+  // ★★★ 한국어 YouTube/영상 관련 ★★★
+  // ==========================================================================
+  /시청.*감사/i,
+  /구독.*좋아요/i,
   /좋아요.*구독/i,
   /채널.*구독/i,
-  /다음\s*영상에서\s*만나/i,  // "다음 영상에서 만나요"
+  /다음\s*영상에서\s*만나/i,
   /다음\s*영상에서\s*만나요/i,
+  /구독.*알림\s*설정/i,
+  /좋아요.*눌러/i,
+  /구독\s*버튼/i,
+  /알림\s*버튼/i,
+  /종\s*모양/i,
+  /댓글.*남겨/i,
+  /영상.*끝까지.*봐/i,
+  /채널.*방문/i,
+  /링크.*확인/i,
+  /다음\s*시간에\s*만나/i,
+  /다음\s*편에서/i,
+  /영상\s*봐\s*주셔서/i,
+  /시청\s*감사/i,
+  /끝까지\s*시청/i,
+  /오늘\s*영상은\s*여기까지/i,
+  /오늘은\s*여기까지/i,
+  /좋은\s*하루/i,
+  /좋은\s*밤/i,
+  /행복한\s*하루/i,
+  /즐거운\s*(하루|시간)/i,
+  
+  // ==========================================================================
+  // ★★★ 한국어 자막/편집 크레딧 (핵심 필터) ★★★
+  // ==========================================================================
+  /자막\s*(제작|편집|번역|감수)\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /자막\s*[:|\-]\s*[가-힣a-zA-Z]+/i,
+  /편집\s*(자|자막|영상)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /편집자\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /영상\s*편집\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /번역\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /번역자\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /감수\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /제작\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /촬영\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /연출\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /기획\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /진행\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /나레이션\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /성우\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /해설\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /출연\s*(자)?\s*[:|\-]?\s*[가-힣a-zA-Z]+/i,
+  /협찬\s*[:|\-]/i,
+  /후원\s*[:|\-]/i,
+  /스폰서\s*[:|\-]/i,
+  /제공\s*[:|\-]/i,
+  /저작권/i,
+  /무단\s*(복제|전재|배포)/i,
+  /all\s*rights?\s*reserved/i,
+  
+  // ==========================================================================
+  // ★★★ 영어 YouTube/영상 관련 ★★★
+  // ==========================================================================
   /thank\s*you\s*for\s*watching/i,
+  /thanks\s*for\s*watching/i,
   /please\s*subscribe/i,
   /like\s*and\s*subscribe/i,
-  // [advice from AI] ★ 추가 할루시네이션 패턴 (로그 분석 기반)
-  /^감사합니다\.?$/i,   // 단독 "감사합니다"
-  /^많은$/i,            // 단독 "많은"
-  /^3회$/i,             // 단독 "3회" (국무회의 오인식)
-  /이\s*시각\s*세계였습니다/i,  // "이 시각 세계였습니다" (오인식)
-  /^것처럼$/i,          // 단독 "것처럼" (잘린 인식)
-  /^것\s*같습니다\.?$/i,  // 단독 "것 같습니다"
-  /^있는\s*겁니다\.?$/i,  // 단독 "있는 겁니다"
-  /^되겠습니다\.?$/i,   // 단독 "되겠습니다"
-  /^것입니다\.?$/i,     // 단독 "것입니다"
+  /don't\s*forget\s*to\s*(like|subscribe|comment)/i,
+  /hit\s*the\s*(like|subscribe|notification|bell)/i,
+  /smash\s*(the|that)\s*(like|subscribe)/i,
+  /leave\s*a\s*(like|comment)/i,
+  /click\s*the\s*(subscribe|bell|link)/i,
+  /check\s*out\s*(my|our|the)\s*(channel|video|link)/i,
+  /follow\s*(me|us)\s*on/i,
+  /see\s*you\s*in\s*the\s*next/i,
+  /see\s*you\s*next\s*time/i,
+  /until\s*next\s*time/i,
+  /stay\s*tuned/i,
+  /watch\s*more\s*videos/i,
+  /more\s*videos\s*coming\s*soon/i,
+  /new\s*video\s*every/i,
+  
+  // ==========================================================================
+  // ★★★ 영어 자막/편집 크레딧 (핵심 필터) ★★★
+  // ==========================================================================
+  /subtitl(e|ed|ing|es)?\s*(by|:)/i,
+  /transcrib(e|ed|ing|es)?\s*(by|:)/i,
+  /edit(ed|ing|or|s)?\s*(by|:)/i,
+  /translat(e|ed|ing|ion|or|s)?\s*(by|:)/i,
+  /caption(ed|s|ing)?\s*(by|:)/i,
+  /creat(e|ed|ing|or|s)?\s*(by|:)/i,
+  /produc(e|ed|ing|er|tion)?\s*(by|:)/i,
+  /direct(ed|or|ing)?\s*(by|:)/i,
+  /writt(en|ing)?\s*(by|:)/i,
+  /narrat(e|ed|ing|or)?\s*(by|:)/i,
+  /present(ed|ing|er)?\s*(by|:)/i,
+  /host(ed|ing)?\s*(by|:)/i,
+  /powered\s*by/i,
+  /sponsored\s*by/i,
+  /brought\s*to\s*you\s*by/i,
+  /made\s*(possible\s*)?\s*by/i,
+  /courtesy\s*of/i,
+  /copyright/i,
+  
+  // ==========================================================================
+  // ★★★ 중국어/일본어 할루시네이션 ★★★
+  // ==========================================================================
+  /感谢\s*收看/i,
+  /感谢\s*观看/i,
+  /请\s*订阅/i,
+  /请\s*点赞/i,
+  /字幕\s*[:：]/i,
+  /翻译\s*[:：]/i,
+  /编辑\s*[:：]/i,
+  /制作\s*[:：]/i,
+  /ご視聴.*ありがとう/i,
+  /チャンネル登録/i,
+  /高評価/i,
+  
+  // ==========================================================================
+  // ★★★ 한국어 단독 문구 (의미없는 조각) ★★★
+  // ==========================================================================
+  /^감사합니다\.?$/i,
+  /^많은$/i,
+  /^3회$/i,
+  /이\s*시각\s*세계였습니다/i,
+  /^것처럼$/i,
+  /^것\s*같습니다\.?$/i,
+  /^있는\s*겁니다\.?$/i,
+  /^되겠습니다\.?$/i,
+  /^것입니다\.?$/i,
+  /^합니다\.?$/i,
+  /^입니다\.?$/i,
+  /^습니다\.?$/i,
+  /^니다\.?$/i,
+  /^데요\.?$/i,
+  /^거든요\.?$/i,
+  /^잖아요\.?$/i,
+  /^인데(요)?\.?$/i,
+  /^라고(요)?\.?$/i,
+  /^니까(요)?\.?$/i,
+  /^지만(요)?\.?$/i,
+  /^그래서(요)?\.?$/i,
+  /^그런데(요)?\.?$/i,
+  /^그리고(요)?\.?$/i,
+  /^하지만(요)?\.?$/i,
+  /^그러면(요)?\.?$/i,
+  /^그러나(요)?\.?$/i,
+  /^여기까지(입니다|예요)?\.?$/i,
+  
+  // ==========================================================================
+  // ★★★ 한국어 짧은 응답/추임새 ★★★
+  // ==========================================================================
+  /^아\.?$/i,
+  /^어\.?$/i,
+  /^음\.?$/i,
+  /^응\.?$/i,
+  /^네\.?$/i,
+  /^예\.?$/i,
+  /^뭐\.?$/i,
+  /^왜\.?$/i,
+  /^그래(요)?\.?$/i,
+  /^그렇죠\.?$/i,
+  /^맞아(요)?\.?$/i,
+  /^정말(요)?\??$/i,
+  /^진짜(요)?\??$/i,
+  /^아니(요)?\.?$/i,
+  /^글쎄(요)?\.?$/i,
+  
+  // ==========================================================================
+  // ★★★ 무음/배경음/효과음 ★★★
+  // ==========================================================================
+  /^음성\s*없음\.?$/i,
+  /^무음\.?$/i,
+  /^침묵\.?$/i,
+  /^(박수|환호|음악|웃음|울음|탄성|한숨|기침)(\s*소리)?\.?$/i,
+  /^박수\s*갈채\.?$/i,
+  /^배경\s*음악\.?$/i,
+  /^배경음\.?$/i,
+  /^효과음\.?$/i,
+  /^잡음\.?$/i,
+  /^테스트(입니다)?\.?$/i,
+  /^마이크\s*테스트\.?$/i,
+  /^\[음악\]$/i,
+  /^\[박수\]$/i,
+  /^\[웃음\]$/i,
+  /^\[침묵\]$/i,
+  /^\(음악\)$/i,
+  /^\(박수\)$/i,
+  /^\(웃음\)$/i,
+  /^\(침묵\)$/i,
+  
+  // ==========================================================================
+  // ★★★ 반복 패턴 ★★★
+  // ==========================================================================
+  /^(네|예)(\s*(네|예)){2,}\.?$/i,
+  /^(음|어|음음|어어)+$/i,
+  /^(네네네|예예예|네네|예예)+$/i,
+  /^(아아아|어어어|음음음)+$/i,
+  /^(하하|히히|호호|허허|후후)+$/i,
+  /^(ㅎㅎ|ㅋㅋ|ㅎㅎㅎ|ㅋㅋㅋ)+$/i,
+  
+  // ==========================================================================
+  // ★★★ 영어 기타 할루시네이션 ★★★
+  // ==========================================================================
+  /^(okay|ok|yes|no|um|uh|oh|ah|hmm|huh|well)\.?$/i,
+  /^one\s*moment(\s*please)?\.?$/i,
+  /^just\s*a\s*(moment|second|sec)\.?$/i,
+  /^hold\s*on\.?$/i,
+  /^wait\.?$/i,
+  /^(sorry|excuse\s*me|pardon)\??$/i,
+  /^(right|exactly|indeed|absolutely|definitely|of\s*course|sure)\.?$/i,
+  /^(anyway|moving\s*on|next)\.?$/i,
+  /^(and|but|so|now|then|here|there)\.{0,3}$/i,
+  /^hello\.?$/i,
+  /^hi\.?$/i,
+  /^bye\.?$/i,
+  /^goodbye\.?$/i,
+  
+  // ==========================================================================
+  // ★★★ 뉴스/방송 관련 ★★★
+  // ==========================================================================
+  /지금까지\s*.+\s*기자였습니다/i,
+  /.+\s*기자의\s*보도였습니다/i,
+  /.+에서\s*전해드렸습니다/i,
+  /^뉴스였습니다\.?$/i,
+  /^보도였습니다\.?$/i,
+  /^속보입니다\.?$/i,
+  /.+\s*아나운서였습니다/i,
+  /^앵커였습니다\.?$/i,
+  /이상\s*.+\s*뉴스였습니다/i,
+  /청취해\s*주셔서\s*감사/i,
+  /들어주셔서\s*감사/i,
+  /이\s*시간\s*마치겠습니다/i,
+  /다음\s*시간에\s*뵙겠습니다/i,
+  /다음\s*주에\s*(만나요|뵙겠습니다)/i,
+  
+  // ==========================================================================
+  // ★★★ 스페인어/프랑스어/독일어 할루시네이션 ★★★
+  // ==========================================================================
+  /^(gracias|hola|adiós|por\s*favor|sí)\.?$/i,
+  /^(merci|bonjour|au\s*revoir|s'il\s*vous\s*plaît|oui)\.?$/i,
+  /^(danke|hallo|auf\s*wiedersehen|bitte|ja)\.?$/i,
+  /subtítulos\s*por/i,
+  /sous-titres\s*par/i,
+  /untertitel\s*von/i,
+  
+  // ==========================================================================
+  // ★★★ 특수 문자/기호 ★★★
+  // ==========================================================================
+  /^[\s\.\,\!\?\-\~\♪\♫\…\*\#\@\&\%\$\^\=\+\_\|\\\[\]\{\}\<\>\'\"\`]+$/i,
+  /^\.{2,}$/i,
+  /^[-_=+*#@!?.,;:]{2,}$/i,
+  /^\(.*\)$/i,
+  /^\[.*\]$/i,
+  /^「.*」$/i,
+  /^『.*』$/i,
+  /^《.*》$/i,
+  /^【.*】$/i,
+  /^[ㄱ-ㅎㅏ-ㅣ]+$/i,  // 자음/모음만
+  /^[a-zA-Z]$/i,  // 단일 알파벳
+  /^[가-힣]$/i,   // 단일 한글
+  /^\d+$/i,      // 숫자만
+  /^\d+:\d+$/i,  // 시간 형식만
 ];
 
 /**
  * [advice from AI] ★ 강력한 할루시네이션 체크 - 길이와 관계없이 항상 필터
  * handleBufferUpdate에서 사용
+ * Python HallucinationDetector 패턴 통합
  */
 export function isStrongHallucination(text: string): boolean {
   if (!text) return true;
   const trimmed = text.trim();
   
+  // [advice from AI] ★ 1. 기본 강력 패턴 체크
   for (const pattern of STRONG_HALLUCINATION_PATTERNS) {
     if (pattern.test(trimmed)) {
       return true;
     }
   }
+  
+  // [advice from AI] ★ 2. 침묵 구간 할루시네이션 패턴 체크
+  for (const pattern of SILENCE_HALLUCINATION_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      console.log(`[HALLUCINATION] 🔇 침묵 구간 패턴: "${trimmed.substring(0, 30)}..."`);
+      return true;
+    }
+  }
+  
+  // [advice from AI] ★ 3. 방송 뉴스 할루시네이션 패턴 체크
+  for (const pattern of BROADCAST_HALLUCINATION_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      console.log(`[HALLUCINATION] 📺 방송 뉴스 패턴: "${trimmed.substring(0, 30)}..."`);
+      return true;
+    }
+  }
+  
+  // [advice from AI] ★ 4. 종교적 표현 할루시네이션 패턴 체크
+  for (const pattern of RELIGIOUS_HALLUCINATION_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      console.log(`[HALLUCINATION] ⛪ 종교적 표현 패턴: "${trimmed.substring(0, 30)}..."`);
+      return true;
+    }
+  }
+  
+  // [advice from AI] ★ 5. 방송인 이름 할루시네이션 패턴 체크
+  for (const pattern of BROADCASTER_NAME_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      console.log(`[HALLUCINATION] 🎙️ 방송인 이름 패턴: "${trimmed.substring(0, 30)}..."`);
+      return true;
+    }
+  }
+  
+  // [advice from AI] ★ 6. 한국어 간투사/감탄사 할루시네이션 패턴 체크 (짧은 텍스트만)
+  if (trimmed.length <= 10) {
+    for (const pattern of KOREAN_INTERJECTION_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        console.log(`[HALLUCINATION] 💬 간투사 패턴: "${trimmed}"`);
+        return true;
+      }
+    }
+  }
+  
   return false;
 }
 

@@ -36,11 +36,8 @@ interface SensitiveItem {
 interface SubtitleRules {
   max_lines: number;
   max_chars_per_line: number;
-  fade_timeout_ms: number;
-  display_delay_ms: number;
-  min_display_ms: number;
-  break_on_sentence_end: boolean;
-  postprocess_enabled: boolean;  // [advice from AI] 후처리 ON/OFF 설정
+  fade_timeout_ms: number;      // [advice from AI] 묵음 후 자막 사라지는 시간 (5초)
+  postprocess_enabled: boolean; // [advice from AI] 후처리 ON/OFF 설정
 }
 
 interface Stats {
@@ -82,13 +79,10 @@ export default function AdminPanel() {
   
   // [advice from AI] 자막 규칙
   const [subtitleRules, setSubtitleRules] = useState<SubtitleRules>({
-    max_lines: 2,
-    max_chars_per_line: 18,
-    fade_timeout_ms: 3000,
-    display_delay_ms: 0,
-    min_display_ms: 1000,
-    break_on_sentence_end: true,
-    postprocess_enabled: true,  // [advice from AI] 기본값: 후처리 ON
+    max_lines: 3,
+    max_chars_per_line: 30,
+    fade_timeout_ms: 5000,      // [advice from AI] 5초간 유지 (묵음 초기화)
+    postprocess_enabled: true,
   });
 
   // [advice from AI] 메시지 표시 + 성공 시 사전 리로드
@@ -582,48 +576,7 @@ export default function AdminPanel() {
                 onChange={e => setSubtitleRules({ ...subtitleRules, fade_timeout_ms: parseInt(e.target.value) || 3000 })}
                 style={styles.ruleInput}
               />
-              <p style={styles.ruleHint}>묵음이 지속되면 자막 페이드아웃 (1000~10000ms)</p>
-            </div>
-
-            <div style={styles.ruleCard}>
-              <label style={styles.ruleLabel}>자막 표시 지연 (ms)</label>
-              <input
-                type="number"
-                min={0}
-                max={5000}
-                step={100}
-                value={subtitleRules.display_delay_ms}
-                onChange={e => setSubtitleRules({ ...subtitleRules, display_delay_ms: parseInt(e.target.value) || 0 })}
-                style={styles.ruleInput}
-              />
-              <p style={styles.ruleHint}>자막 표시 전 대기 시간 (0=실시간)</p>
-            </div>
-
-            <div style={styles.ruleCard}>
-              <label style={styles.ruleLabel}>최소 표시 시간 (ms)</label>
-              <input
-                type="number"
-                min={500}
-                max={5000}
-                step={100}
-                value={subtitleRules.min_display_ms}
-                onChange={e => setSubtitleRules({ ...subtitleRules, min_display_ms: parseInt(e.target.value) || 1000 })}
-                style={styles.ruleInput}
-              />
-              <p style={styles.ruleHint}>자막이 최소한 표시되어야 하는 시간</p>
-            </div>
-
-            <div style={styles.ruleCard}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={subtitleRules.break_on_sentence_end}
-                  onChange={e => setSubtitleRules({ ...subtitleRules, break_on_sentence_end: e.target.checked })}
-                  style={{ width: '18px', height: '18px', accentColor: colors.accent }}
-                />
-                <span style={{ fontWeight: 500 }}>문장 끝에서 줄바꿈</span>
-              </label>
-              <p style={styles.ruleHint}>마침표(.), 물음표(?), 느낌표(!) 후 줄바꿈</p>
+              <p style={styles.ruleHint}>묵음 후 자막 유지 시간 (기본 5초)</p>
             </div>
 
             {/* [advice from AI] 후처리 ON/OFF 토글 */}

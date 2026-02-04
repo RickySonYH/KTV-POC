@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import type { VideoFile } from '../types/subtitle';
 
-// [advice from AI] 2줄 자막 타입
+// [advice from AI] 3줄 자막 타입
 interface SubtitleLine {
   text: string;
   speaker?: string;
@@ -15,8 +15,8 @@ interface VideoPlayerProps {
   video?: VideoFile | null;
   videoUrl?: string | null;
   currentSpeaker: string | null;
-  subtitleLines?: SubtitleLine[];  // [advice from AI] 2줄 자막 시스템용
-  liveSubtitleLines?: string[];  // [advice from AI] 실시간 오디오 캡처용 2줄 자막 (윗줄, 아랫줄)
+  subtitleLines?: SubtitleLine[];  // [advice from AI] 3줄 자막 시스템용
+  liveSubtitleLines?: string[];  // [advice from AI] 실시간 오디오 캡처용 3줄 자막 (상단, 중간, 하단)
   onTimeUpdate: (currentTime: number) => void;
   onDurationChange: (duration: number) => void;
   onPlay: () => void;
@@ -32,9 +32,8 @@ export interface VideoPlayerRef {
 const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({ 
   video, 
   videoUrl,
-  currentSpeaker,
-  subtitleLines = [],  // [advice from AI] 2줄 자막
-  liveSubtitleLines,  // [advice from AI] 실시간 오디오 캡처용 2줄 자막
+  subtitleLines = [],  // [advice from AI] 3줄 자막
+  liveSubtitleLines,  // [advice from AI] 실시간 오디오 캡처용 3줄 자막
   onTimeUpdate, 
   onDurationChange,
   onPlay,
@@ -95,14 +94,6 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     };
   }, [onTimeUpdate, onDurationChange, onPlay, onPause]);
 
-  // [advice from AI] 화자별 색상
-  const getSpeakerColor = (speaker?: string | null) => {
-    if (!speaker) return '#0073cf';
-    const num = parseInt(speaker.replace(/\D/g, '')) || 1;
-    const colors = ['#0073cf', '#28a745', '#fd7e14', '#6f42c1'];
-    return colors[(num - 1) % colors.length];
-  };
-
   return (
     <div className="card" style={{ margin: 0 }}>
       <div className="video-container" style={{ position: 'relative' }}>
@@ -150,60 +141,110 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
           </div>
         )}
         
-        {/* [advice from AI] 2줄 자막 시스템 - 아래서 추가(페이드인), 위에서 삭제(페이드아웃) */}
-        {/* [advice from AI] liveSubtitleLines: 윗줄[0], 아랫줄[1] - 20자씩 누적 표시 */}
-        {(subtitleLines.length > 0 || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]))) && (
+        {/* [advice from AI] 3줄 자막 시스템 - 상단[0], 중간[1], 하단/수집창[2] */}
+        {/* [advice from AI] liveSubtitleLines: 상단[0], 중간[1], 수집창[2] - 30자씩 누적 표시 */}
+        {/* [advice from AI] ★ [2]도 체크해야 수집창만 있을 때도 컨테이너 표시됨! */}
+        {/* [advice from AI] ★★★ 자막창 위치: 화면 중앙, 30자 고정 너비, 텍스트 좌측 정렬 ★★★ */}
+        {(subtitleLines.length > 0 || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1] || liveSubtitleLines[2]))) && (
           <div style={{
             position: 'absolute',
             bottom: '60px',
-            left: '0',
-            right: '0',
-            display: 'flex',
-            justifyContent: 'center',
+            left: '50%',  // [advice from AI] 화면 중앙 기준
+            transform: 'translateX(-50%)',  // [advice from AI] 정확한 중앙 정렬
             zIndex: 10
           }}>
             <div style={{
               display: 'flex',
               flexDirection: 'column',
-              alignItems: 'center',
+              alignItems: 'flex-start',  // [advice from AI] 텍스트 좌측 정렬
               gap: '6px',
               background: 'rgba(0, 0, 0, 0.85)',
               padding: '14px 28px',
               borderRadius: '8px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              maxWidth: '90%',
-              textAlign: 'center'
+              width: '720px',  // [advice from AI] 30자 기준 고정 너비 (24px * 30자)
+              minWidth: '720px',
+              maxWidth: '720px',
+              textAlign: 'left'  // [advice from AI] 좌에서 우로 텍스트 쓰기
             }}>
-              {/* [advice from AI] 실시간 오디오 캡처용 자막 (최우선) - 2줄 고정 */}
-              {liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]) ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {/* [advice from AI] 윗줄 - 두 줄 모두 동일 스타일 (흐림 제거) */}
-                  {liveSubtitleLines[0] && (
+              {/* [advice from AI] 확정 자막 (subtitleLines) 우선 표시 - 화자분리 "-" 적용됨 */}
+              {subtitleLines.length > 0 ? (
+                subtitleLines.map((line) => (
+                  <div 
+                    key={line.id} 
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      opacity: line.fading ? 0 : 1,
+                      transform: line.fading ? 'translateY(-10px)' : 'translateY(0)',
+                      transition: 'all 0.5s ease',
+                      maxWidth: '100%',  // [advice from AI] 한 줄 제한
+                    }}
+                  >
+                    <span style={{
+                      color: '#fff',
+                      fontSize: '24px',
+                      fontWeight: '600',
+                      lineHeight: '1.4',  // [advice from AI] 줄 간격 축소
+                      letterSpacing: '0.5px',
+                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
+                      whiteSpace: 'nowrap',  // [advice from AI] 한 줄 강제
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '100%',
+                    }}>
+                      {line.text}
+                    </span>
+                  </div>
+                ))
+              ) : (isProcessing || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1] || liveSubtitleLines[2]))) ? (
+                // [advice from AI] ★ isProcessing 중이면 컨테이너 항상 표시!
+                // 묵음 시에도 컨테이너가 사라지지 않고, 새 자막이 즉시 나타남
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minHeight: '30px' }}>
+                  {/* [advice from AI] 1줄 (상단) - 가장 오래된 확정 자막 */}
+                  {liveSubtitleLines && liveSubtitleLines[0] ? (
                     <div>
                       <span style={{
                         color: '#fff',
-                        fontSize: '20px',
-                        fontWeight: '500',
-                        lineHeight: '1.4',
-                        textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
+                        fontSize: '24px',
+                        fontWeight: '600',
+                        lineHeight: '1.6',
+                        letterSpacing: '0.5px',
+                        textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
                       }}>
                         {liveSubtitleLines[0]}
                       </span>
                     </div>
-                  )}
-                  {/* [advice from AI] 아랫줄 - 두 줄 모두 동일 스타일 */}
-                  {liveSubtitleLines[1] && (
+                  ) : null}
+                  {/* [advice from AI] 2줄 (중간) - 이전 확정 자막 */}
+                  {liveSubtitleLines && liveSubtitleLines[1] ? (
                   <div>
+                      <span style={{
+                        color: '#fff',
+                        fontSize: '24px',
+                        fontWeight: '600',
+                        lineHeight: '1.6',
+                        letterSpacing: '0.5px',
+                        textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
+                      }}>
+                        {liveSubtitleLines[1]}
+                      </span>
+                    </div>
+                  ) : null}
+                  {/* [advice from AI] 3줄 (하단) - 현재 인식 중인 자막 */}
+                  <div style={{ minHeight: '30px' }}>
                     <span style={{
                       color: '#fff',
-                      fontSize: '20px',
-                      fontWeight: '500',
-                      lineHeight: '1.4',
-                      textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
+                      fontSize: '24px',
+                      fontWeight: '600',
+                      lineHeight: '1.6',
+                      letterSpacing: '0.5px',
+                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
                     }}>
-                        {liveSubtitleLines[1]}
-                        {/* 입력 중 커서 표시 */}
-                        {isProcessing && (
+                      {liveSubtitleLines && liveSubtitleLines[2] ? liveSubtitleLines[2] : ''}
+                      {/* [advice from AI] 입력 중 커서 표시 - 항상 표시하여 수집 중임을 알림 */}
+                      {isProcessing && (
                         <span style={{
                           display: 'inline-block',
                           width: '2px',
@@ -216,47 +257,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                       )}
                     </span>
                   </div>
-                  )}
                 </div>
-              ) : subtitleLines.length > 0 ? (
-                /* [advice from AI] 기존 2줄 자막 시스템 - 두 줄 모두 동일한 스타일로 표시 */
-                subtitleLines.map((line, idx) => (
-                  <div 
-                    key={line.id} 
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      opacity: line.fading ? 0 : 1,  // [advice from AI] 흐림 제거 - 두 줄 모두 100%
-                      transform: line.fading ? 'translateY(-10px)' : 'translateY(0)',
-                      transition: 'all 0.5s ease',
-                    }}
-                  >
-                    {line.speaker && idx === subtitleLines.length - 1 && (
-                      <span style={{
-                        display: 'inline-block',
-                        background: getSpeakerColor(line.speaker),
-                        color: '#fff',
-                        padding: '2px 10px',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        flexShrink: 0
-                      }}>
-                        {line.speaker}
-                      </span>
-                    )}
-                    <span style={{
-                      color: '#fff',
-                      fontSize: '20px',  // [advice from AI] 두 줄 동일 크기
-                      fontWeight: '500',  // [advice from AI] 두 줄 동일 굵기
-                      lineHeight: '1.4',
-                      textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
-                    }}>
-                      {line.text}
-                    </span>
-                  </div>
-                ))
               ) : null}
             </div>
           </div>

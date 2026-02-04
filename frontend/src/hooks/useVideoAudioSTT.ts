@@ -17,6 +17,7 @@ export interface BufferUpdate {
   text: string;
   speaker?: string;
   isNoAudio?: boolean;  // [advice from AI] 오디오 없음/음악 감지용
+  linesCount?: number;  // [advice from AI] 현재 lines.length - 가상 segment ID로 활용하여 중복 방지
 }
 
 interface UseVideoAudioSTTProps {
@@ -88,6 +89,15 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
     }
     
     videoElementRef.current = video;  // 저장
+    
+    // [advice from AI] ★★★ 초반 텍스트 손실 방지 ★★★
+    // 비디오를 일시 정지하고, WebSocket + AudioContext 준비 완료 후 재생
+    const wasPlaying = !video.paused;
+    const savedCurrentTime = video.currentTime;
+    if (wasPlaying) {
+      video.pause();
+      console.log('[VIDEO-STT] ⏸️ 비디오 일시 정지 (캡처 준비 중...)');
+    }
 
     try {
       updateStatus('connecting');
@@ -137,28 +147,75 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
         const targetSampleRate = 16000;
         const resampleRatio = actualSampleRate / targetSampleRate;
         
-        console.log(`[VIDEO-STT] 📼 AudioContext: ${actualSampleRate}Hz → ${targetSampleRate}Hz`);
+        console.log(`[VIDEO-STT] 📼 AudioContext: ${actualSampleRate}Hz → ${targetSampleRate}Hz (비율: ${resampleRatio.toFixed(2)})`);
         
         // [advice from AI] MediaStreamSource 사용 - CORS 문제 회피 + 재사용 가능
         // captureStream()에서 얻은 스트림 직접 사용
         const source = audioContext.createMediaStreamSource(stream);
         
+        // [advice from AI] ★ Anti-aliasing 필터 추가 (할루시네이션 감소 핵심!)
+        // 다운샘플링 전에 고주파를 제거해야 aliasing 방지
+        // Nyquist 주파수 (16kHz / 2 = 8kHz) 이하로 필터링
+        const lowpassFilter = audioContext.createBiquadFilter();
+        lowpassFilter.type = 'lowpass';
+        lowpassFilter.frequency.value = 7500;  // 8kHz보다 약간 낮게 설정 (안전 마진)
+        lowpassFilter.Q.value = 0.7;  // Butterworth 특성
+        
+        // [advice from AI] ★ 2단계 필터 (더 급격한 rolloff)
+        const lowpassFilter2 = audioContext.createBiquadFilter();
+        lowpassFilter2.type = 'lowpass';
+        lowpassFilter2.frequency.value = 7500;
+        lowpassFilter2.Q.value = 0.7;
+        
+        // [advice from AI] ★ 노이즈 게이트 효과를 위한 컴프레서 (무음 구간 노이즈 감소)
+        const compressor = audioContext.createDynamicsCompressor();
+        compressor.threshold.value = -50;  // 조용한 소리 감쇄
+        compressor.knee.value = 40;
+        compressor.ratio.value = 12;
+        compressor.attack.value = 0;
+        compressor.release.value = 0.25;
+        
+        console.log('[VIDEO-STT] 🔧 Anti-aliasing 필터 적용: 7500Hz lowpass (2단계) + 컴프레서');
+        
         // [advice from AI] 분석용 노드 - ScriptProcessor로 PCM 추출
-        const bufferSize = 4096;
+        // 버퍼 크기 증가: 4096 → 8192 (더 안정적인 처리)
+        const bufferSize = 8192;
         const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
         
         let chunkCount = 0;
         
-        // 다운샘플링 함수
-        const downsample = (inputData: Float32Array, ratio: number): Float32Array => {
-          if (ratio === 1) return inputData;
+        // [advice from AI] ★ 개선된 다운샘플링 함수 - 선형 보간법 (Linear Interpolation)
+        // 단순 간격 선택 대신 인접 샘플 간 보간으로 부드러운 변환
+        const downsampleWithInterpolation = (inputData: Float32Array, ratio: number): Float32Array => {
+          if (ratio <= 1) return inputData;
           const outputLength = Math.floor(inputData.length / ratio);
           const output = new Float32Array(outputLength);
+          
           for (let i = 0; i < outputLength; i++) {
-            output[i] = inputData[Math.floor(i * ratio)];
+            const srcIndex = i * ratio;
+            const srcIndexFloor = Math.floor(srcIndex);
+            const srcIndexCeil = Math.min(srcIndexFloor + 1, inputData.length - 1);
+            const fraction = srcIndex - srcIndexFloor;
+            
+            // 선형 보간: output = (1 - fraction) * floor + fraction * ceil
+            output[i] = (1 - fraction) * inputData[srcIndexFloor] + fraction * inputData[srcIndexCeil];
           }
           return output;
         };
+        
+        // [advice from AI] ★ 무음 감지용 RMS 계산
+        const calculateRMS = (data: Float32Array): number => {
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) {
+            sum += data[i] * data[i];
+          }
+          return Math.sqrt(sum / data.length);
+        };
+        
+        // 무음 청크 카운터 (연속 무음 감지)
+        let silentChunkCount = 0;
+        const SILENCE_THRESHOLD = 0.005;  // RMS 임계값
+        const MAX_SILENT_CHUNKS = 10;     // 연속 무음 허용 개수
         
         processor.onaudioprocess = (e) => {
           if (ws.readyState !== WebSocket.OPEN) return;
@@ -167,9 +224,25 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           if (video.paused || video.ended) return;
           
           const inputData = e.inputBuffer.getChannelData(0);
-          const resampledData = downsample(inputData, resampleRatio);
           
-          // Float32 → Int16 변환
+          // [advice from AI] ★ 무음 감지 - 완전 무음일 때는 전송 스킵 (할루시네이션 방지)
+          const rms = calculateRMS(inputData);
+          if (rms < SILENCE_THRESHOLD) {
+            silentChunkCount++;
+            if (silentChunkCount > MAX_SILENT_CHUNKS) {
+              // 연속 무음이면 가끔만 전송 (연결 유지용)
+              if (silentChunkCount % 20 !== 0) {
+                return;  // 대부분의 무음 청크 스킵
+              }
+            }
+          } else {
+            silentChunkCount = 0;  // 소리 감지되면 리셋
+          }
+          
+          // [advice from AI] ★ 개선된 다운샘플링 적용
+          const resampledData = downsampleWithInterpolation(inputData, resampleRatio);
+          
+          // Float32 → Int16 변환 (클리핑 방지 포함)
           const pcmData = new Int16Array(resampledData.length);
           for (let i = 0; i < resampledData.length; i++) {
             const s = Math.max(-1, Math.min(1, resampledData[i]));
@@ -178,19 +251,26 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           
           chunkCount++;
           if (chunkCount % 10 === 0) {
-            console.log(`[VIDEO-STT] 📤 PCM 청크 전송: #${chunkCount}, 시간: ${video.currentTime.toFixed(1)}s`);
+            console.log(`[VIDEO-STT] 📤 PCM 청크 전송: #${chunkCount}, 시간: ${video.currentTime.toFixed(1)}s, RMS: ${rms.toFixed(4)}`);
           }
           
           ws.send(pcmData.buffer);
         };
         
-        // [advice from AI] 분석기 노드 연결 (소리 출력에는 영향 없음)
-        source.connect(processor);
+        // [advice from AI] ★ 오디오 체인 연결: source → lowpass1 → lowpass2 → compressor → processor
+        source.connect(lowpassFilter);
+        lowpassFilter.connect(lowpassFilter2);
+        lowpassFilter2.connect(compressor);
+        compressor.connect(processor);
         processor.connect(audioContext.destination);
         
         // ref에 저장 (정리용)
+        // ref에 저장 (정리용)
         (audioContext as any)._processor = processor;
         (audioContext as any)._source = source;
+        (audioContext as any)._lowpassFilter = lowpassFilter;
+        (audioContext as any)._lowpassFilter2 = lowpassFilter2;
+        (audioContext as any)._compressor = compressor;
 
         // [advice from AI] 캡처 시작 시점의 비디오 시간 저장 (타임스탬프 계산용)
         captureStartVideoTimeRef.current = video.currentTime || 0;
@@ -199,6 +279,17 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
         setIsCapturing(true);
         updateStatus('capturing');
         console.log(`[VIDEO-STT] 🎙️ 캡처 시작! 비디오 시간: ${captureStartVideoTimeRef.current.toFixed(1)}s`);
+        
+        // [advice from AI] ★★★ 초반 텍스트 손실 방지 - 준비 완료 후 비디오 재생 ★★★
+        if (wasPlaying) {
+          // 비디오 현재 위치 복원 후 재생
+          video.currentTime = savedCurrentTime;
+          video.play().then(() => {
+            console.log(`[VIDEO-STT] ▶️ 비디오 재생 시작 (${savedCurrentTime.toFixed(1)}s부터)`);
+          }).catch(err => {
+            console.error('[VIDEO-STT] ❌ 비디오 재생 실패:', err);
+          });
+        }
       };
 
       ws.onmessage = (event) => {
@@ -214,12 +305,17 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           const bufferText = data.buffer_transcription || data.buffer || '';
           const currentVideoTime = videoElementRef.current?.currentTime || 0;
           
-          // [advice from AI] ★ 원본 데이터 로깅 (디버깅용)
+          // [advice from AI] ★ 원본 데이터 로깅 (디버깅용) - 화자 정보 포함
+          // [advice from AI] ★ 원본 데이터 로깅 - 화자 정보 상세 확인
           if (lines.length > 0 || bufferText) {
+            const lastLine = lines.length > 0 ? lines[lines.length - 1] : null;
             console.log(`[WHISPER-RAW] 📨 원본:`, {
               lines_count: lines.length,
               buffer: bufferText ? bufferText.substring(0, 50) + '...' : '(empty)',
-              last_line: lines.length > 0 ? lines[lines.length - 1]?.text?.substring(0, 50) : '(none)'
+              last_line: lastLine?.text?.substring(0, 50) || '(none)',
+              // ★ speaker 원본값 확인 (타입 포함)
+              speaker_raw: lastLine?.speaker,
+              speaker_type: typeof lastLine?.speaker
             });
           }
 
@@ -251,8 +347,12 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
             processedLinesSetRef.current.add(lineKey);
             
             segmentIdRef.current += 1;
-            const speaker = line.speaker > 0 ? `화자${line.speaker}` : undefined;
+            // [advice from AI] ★ speaker >= 0이면 유효 (0번 화자도 포함)
+            const speaker = (line.speaker !== undefined && line.speaker !== null && line.speaker >= 0) 
+              ? `화자${line.speaker + 1}` 
+              : undefined;
             lastSpeakerRef.current = line.speaker;
+            console.log(`[STT] 🎤 화자: ${speaker || '없음'} (raw: ${line.speaker})`);
             
             const captureStartVideoTime = captureStartVideoTimeRef.current;
             const parsedEnd = parseTimeString(line.end);
@@ -279,21 +379,34 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           }
           lastLinesCountRef.current = lines.length;
 
-          // 버퍼 텍스트 (실시간 중간 결과) - 로그 없이 전달만
+          // 버퍼 텍스트 (실시간 중간 결과)
           const currentSpeaker = lastSpeakerRef.current;
-          const speakerStr = currentSpeaker && currentSpeaker > 0 ? `화자${currentSpeaker}` : undefined;
+          // [advice from AI] ★ speaker >= 0이면 유효 (0번 화자도 포함)
+          const speakerStr = (currentSpeaker !== undefined && currentSpeaker !== null && currentSpeaker >= 0) 
+            ? `화자${currentSpeaker + 1}` 
+            : undefined;
+          
+          // [advice from AI] ★ 화자 변경 감지를 위한 디버그 로그 (버퍼에 화자 정보 전달)
+          if (bufferText && bufferText.trim()) {
+            // 마지막 유효 화자와 현재 raw 화자 비교
+            const lastLineRawSpeaker = lines.length > 0 ? lines[lines.length - 1]?.speaker : undefined;
+            console.log(`[BUFFER-SPEAKER] 📤 lastSpeakerRef=${currentSpeaker}, lastLineRaw=${lastLineRawSpeaker}, speakerStr=${speakerStr || 'null'}`);
+          }
           
           if (bufferText && bufferText.trim() && onBufferUpdate) {
+            // [advice from AI] linesCount 전달 - 가상 segment ID로 활용하여 중복 방지
             onBufferUpdate({
               text: bufferText.trim(),
-              speaker: speakerStr
+              speaker: speakerStr,
+              linesCount: lines.length  // ★ 핵심: 같은 linesCount면 같은 segment → 교체
             });
           } else if (onBufferUpdate) {
             // 빈 버퍼 전달 (로그 없음)
             onBufferUpdate({
               text: '',
               speaker: speakerStr,
-              isNoAudio: data.status === 'no_audio_detected'
+              isNoAudio: data.status === 'no_audio_detected',
+              linesCount: lines.length
             });
           }
 
