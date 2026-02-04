@@ -114,12 +114,12 @@ const SubtitleList = ({ subtitles, currentTime, status, latestId, videoName = 's
           자막 목록
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '13px', color: '#666' }}>
-            {status === 'processing' && (
+        <span style={{ fontSize: '13px', color: '#666' }}>
+          {status === 'processing' && (
               <span style={{ color: '#dc3545', fontWeight: 'bold' }}>● 실시간 </span>
-            )}
-            총 {subtitles.length}개
-          </span>
+          )}
+          총 {subtitles.length}개
+        </span>
           {/* [advice from AI] SRT 다운로드 버튼 */}
           <button
             onClick={handleDownloadSrt}
@@ -270,9 +270,9 @@ const SubtitleList = ({ subtitles, currentTime, status, latestId, videoName = 's
                   <span
                     onDoubleClick={() => onSubtitleEdit && handleEditStart(subtitle)}
                     style={{
-                      flex: 1,
-                      fontSize: '14px',
-                      color: '#333',
+                  flex: 1,
+                  fontSize: '14px',
+                  color: '#333',
                       lineHeight: '1.4',
                       cursor: onSubtitleEdit ? 'text' : 'default',
                       padding: '2px 4px',
@@ -281,8 +281,8 @@ const SubtitleList = ({ subtitles, currentTime, status, latestId, videoName = 's
                     }}
                     title={onSubtitleEdit ? '더블클릭하여 편집' : undefined}
                   >
-                    {subtitle.text}
-                  </span>
+                  {subtitle.text}
+                </span>
                 )}
                 
                 {/* NEW 표시 */}

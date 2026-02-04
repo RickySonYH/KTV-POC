@@ -67,6 +67,8 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
   // [advice from AI] 유니크 ID 생성 - timestamp 기반 + 큰 오프셋으로 App.tsx와 충돌 방지
   const segmentIdRef = useRef(Date.now() + 1000000);
   const lastLinesCountRef = useRef(0);
+  // [advice from AI] ★ 이미 처리한 lines 텍스트 추적 (중복 방지) - 리셋 시에도 같은 텍스트 다시 처리 안 함
+  const processedLinesSetRef = useRef<Set<string>>(new Set());
   // [advice from AI] 캡처 시작 시점의 비디오 시간 (타임스탬프 계산용)
   const captureStartVideoTimeRef = useRef(0);
   const lastSpeakerRef = useRef<number | undefined>(undefined);
@@ -193,6 +195,7 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
         // [advice from AI] 캡처 시작 시점의 비디오 시간 저장 (타임스탬프 계산용)
         captureStartVideoTimeRef.current = video.currentTime || 0;
         lastLinesCountRef.current = 0;
+        processedLinesSetRef.current.clear();  // [advice from AI] ★ 처리된 lines 추적 초기화
         setIsCapturing(true);
         updateStatus('capturing');
         console.log(`[VIDEO-STT] 🎙️ 캡처 시작! 비디오 시간: ${captureStartVideoTimeRef.current.toFixed(1)}s`);
@@ -220,6 +223,13 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
             });
           }
 
+          // [advice from AI] WhisperLiveKit이 lines를 리셋할 수 있으므로 체크
+          // lines_count가 현재 저장된 값보다 작아지면 리셋된 것
+          if (lines.length < lastLinesCountRef.current) {
+            console.log(`[STT] 🔄 lines 리셋 감지: ${lastLinesCountRef.current} → ${lines.length}`);
+            lastLinesCountRef.current = 0;
+          }
+
           // 새로운 lines 처리 (최종 결과)
           for (let i = lastLinesCountRef.current; i < lines.length; i++) {
             const line = lines[i];
@@ -229,13 +239,23 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
             const rawText = line.text.trim();
             if (!rawText) continue;
             
+            // [advice from AI] ★ 이미 처리한 텍스트인지 체크 (리셋 후 중복 방지)
+            // startTime + rawText 조합으로 고유 키 생성
+            const parsedStart = parseTimeString(line.start);
+            const lineKey = `${parsedStart?.toFixed(1) || 'unknown'}_${rawText.substring(0, 30)}`;
+            
+            if (processedLinesSetRef.current.has(lineKey)) {
+              console.log(`[STT] ⏭️ 이미 처리된 lines 스킵: "${rawText.substring(0, 30)}..."`);
+              continue;
+            }
+            processedLinesSetRef.current.add(lineKey);
+            
             segmentIdRef.current += 1;
             const speaker = line.speaker > 0 ? `화자${line.speaker}` : undefined;
             lastSpeakerRef.current = line.speaker;
             
-            const parsedStart = parseTimeString(line.start);
-            const parsedEnd = parseTimeString(line.end);
             const captureStartVideoTime = captureStartVideoTimeRef.current;
+            const parsedEnd = parseTimeString(line.end);
             
             const startTime = parsedStart !== null 
               ? captureStartVideoTime + parsedStart 

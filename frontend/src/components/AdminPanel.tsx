@@ -40,6 +40,7 @@ interface SubtitleRules {
   display_delay_ms: number;
   min_display_ms: number;
   break_on_sentence_end: boolean;
+  postprocess_enabled: boolean;  // [advice from AI] 후처리 ON/OFF 설정
 }
 
 interface Stats {
@@ -87,6 +88,7 @@ export default function AdminPanel() {
     display_delay_ms: 0,
     min_display_ms: 1000,
     break_on_sentence_end: true,
+    postprocess_enabled: true,  // [advice from AI] 기본값: 후처리 ON
   });
 
   // [advice from AI] 메시지 표시 + 성공 시 사전 리로드
@@ -622,6 +624,26 @@ export default function AdminPanel() {
                 <span style={{ fontWeight: 500 }}>문장 끝에서 줄바꿈</span>
               </label>
               <p style={styles.ruleHint}>마침표(.), 물음표(?), 느낌표(!) 후 줄바꿈</p>
+            </div>
+
+            {/* [advice from AI] 후처리 ON/OFF 토글 */}
+            <div style={{ ...styles.ruleCard, background: subtitleRules.postprocess_enabled ? '#e8f5e9' : '#fff3e0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={subtitleRules.postprocess_enabled}
+                  onChange={e => setSubtitleRules({ ...subtitleRules, postprocess_enabled: e.target.checked })}
+                  style={{ width: '18px', height: '18px', accentColor: subtitleRules.postprocess_enabled ? '#4caf50' : '#ff9800' }}
+                />
+                <span style={{ fontWeight: 600, color: subtitleRules.postprocess_enabled ? '#2e7d32' : '#e65100' }}>
+                  후처리 {subtitleRules.postprocess_enabled ? 'ON' : 'OFF'}
+                </span>
+              </label>
+              <p style={styles.ruleHint}>
+                {subtitleRules.postprocess_enabled 
+                  ? '✅ 고유명사, 비속어 필터, 오인식 수정 등 모든 후처리 적용'
+                  : '⚠️ WhisperLiveKit 원본 그대로 표시 (디버깅/비교용)'}
+              </p>
             </div>
           </div>
 

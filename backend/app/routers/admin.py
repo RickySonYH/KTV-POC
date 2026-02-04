@@ -136,6 +136,7 @@ class SubtitleRules(BaseModel):
     display_delay_ms: int = 0
     min_display_ms: int = 1000
     break_on_sentence_end: bool = True
+    postprocess_enabled: bool = True  # [advice from AI] 후처리 ON/OFF 설정
 
 
 # =============================================================================
@@ -361,7 +362,7 @@ async def add_hallucination_pattern(pattern: FilterPattern):
     save_data(data)
     logger.info(f"✅ 할루시네이션 패턴 추가: {pattern.pattern}")
     return {"message": "추가 완료", "total": len(data['hallucination'])}
-
+    
 @router.delete("/hallucination/{pattern:path}")
 async def delete_hallucination_pattern(pattern: str):
     """할루시네이션 패턴 삭제"""
@@ -405,7 +406,8 @@ async def get_subtitle_rules():
         'fade_timeout_ms': 3000,
         'display_delay_ms': 0,
         'min_display_ms': 1000,
-        'break_on_sentence_end': True
+        'break_on_sentence_end': True,
+        'postprocess_enabled': True  # [advice from AI] 기본값: 후처리 ON
     })
 
 @router.post("/subtitle-rules")
@@ -427,7 +429,8 @@ async def reset_subtitle_rules():
         'fade_timeout_ms': 3000,
         'display_delay_ms': 0,
         'min_display_ms': 1000,
-        'break_on_sentence_end': True
+        'break_on_sentence_end': True,
+        'postprocess_enabled': True  # [advice from AI] 기본값: 후처리 ON
     }
     save_data(data)
     logger.info("🔄 자막 규칙 초기화")

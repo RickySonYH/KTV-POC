@@ -7,7 +7,7 @@ import VideoPlayer, { type VideoPlayerRef } from './components/VideoPlayer';
 import SubtitleExport from './components/SubtitleExport';
 import AdminPanel from './components/AdminPanel';
 import { useVideoAudioSTT, type VideoAudioSubtitle, type BufferUpdate } from './hooks/useVideoAudioSTT';
-import { loadDictionaries, isHallucination, postprocessText } from './utils/sttPostprocessing';
+import { loadDictionaries, isHallucination, isStrongHallucination, postprocessText } from './utils/sttPostprocessing';
 import type { VideoFile, SubtitleSegment } from './types/subtitle';
 import './styles/App.css';
 
@@ -21,6 +21,7 @@ interface SubtitleRules {
   display_delay_ms: number;
   min_display_ms: number;
   break_on_sentence_end: boolean;
+  postprocess_enabled: boolean;  // [advice from AI] 후처리 ON/OFF 설정
 }
 
 // [advice from AI] 기본 자막 규칙 (API 로드 전 또는 실패 시)
@@ -31,6 +32,7 @@ const DEFAULT_SUBTITLE_RULES: SubtitleRules = {
   display_delay_ms: 0,
   min_display_ms: 1000,
   break_on_sentence_end: true,
+  postprocess_enabled: true,  // [advice from AI] 기본값: 후처리 ON
 };
 
 // [advice from AI] 백엔드 API URL
@@ -386,7 +388,7 @@ function App() {
     sentenceStartTimeRef.current = endTime;  // 다음 문장 시작 시간
     currentSentenceRef.current = '';  // 문장 리셋
   }, []);
-
+  
   // [advice from AI] 화면용 연속 텍스트 ref (handleBufferUpdate보다 먼저 선언)
   const displayTextRef = useRef<string>('');
   const lastCompletedTextRef = useRef<string>('');
@@ -506,8 +508,10 @@ function App() {
     displayTextRef.current = rawText.slice(-preserveLength);
     lastBufferTextRef.current = '';
     
-    // [advice from AI] 화면 표시에도 후처리 적용
-    const displayProcessed = postprocessText(displayTextRef.current, false) || displayTextRef.current;
+    // [advice from AI] 화면 표시 - 후처리 ON/OFF에 따라 분기
+    const displayProcessed = subtitleRules.postprocess_enabled 
+      ? (postprocessText(displayTextRef.current, false) || displayTextRef.current)
+      : displayTextRef.current;
     updateDisplayLines(displayProcessed);
     
     // Step 1: 문장 분리
@@ -520,11 +524,14 @@ function App() {
       rawSentences.push(rawText);
     }
     
-    // Step 2: 후처리
+    // Step 2: 후처리 (ON/OFF에 따라 분기)
     const processedSentences: { original: string; processed: string }[] = [];
     
     for (const sentence of rawSentences) {
-      const processed = postprocessText(sentence, true);
+      // [advice from AI] postprocess_enabled가 false면 원본 그대로 사용
+      const processed = subtitleRules.postprocess_enabled 
+        ? postprocessText(sentence, true)
+        : sentence;
       if (processed && processed.length > 0) {
         processedSentences.push({ original: sentence, processed });
       }
@@ -580,11 +587,22 @@ function App() {
     }
     
     currentSentenceRef.current = '';
-  }, [updateDisplayLines, isRecentlyAdded, addToRecentTexts]);
+  }, [updateDisplayLines, isRecentlyAdded, addToRecentTexts, subtitleRules.postprocess_enabled]);
+
+  // [advice from AI] ★ 공통 접두사 길이 계산 (버퍼 연속성 판단용)
+  const getCommonPrefixLength = useCallback((str1: string, str2: string): number => {
+    let i = 0;
+    const minLen = Math.min(str1.length, str2.length);
+    while (i < minLen && str1[i] === str2[i]) {
+      i++;
+    }
+    return i;
+  }, []);
 
   // [advice from AI] 실시간 버퍼 업데이트 (중간 결과) - 화면 표시
-  // ★ 핵심: WhisperLiveKit buffer는 새 인식이 시작되면 리셋됨!
-  // ★ 해결: 이전 버퍼를 보존하고, 새 버퍼가 이전 버퍼를 포함하지 않으면 누적!
+  // ★ 핵심: "공통 접두사 기반 연속성 판단"으로 수정/추가 구분!
+  // ★ Whisper가 같은 구간을 수정하면 → 대체 (누적 X)
+  // ★ 완전히 새로운 segment면 → 이전 buffer 완료 처리
   const handleBufferUpdate = useCallback((buffer: BufferUpdate) => {
     const rawText = buffer.text.trim();
     const prevBuffer = lastBufferTextRef.current;
@@ -599,14 +617,39 @@ function App() {
       return;
     }
     
-    // ★ 1. 할루시네이션 필터 - 새 버퍼 텍스트만 체크
-    // [advice from AI] 10자 이상이면 할루시네이션 체크 건너뜀
+    // [advice from AI] ★ 버퍼 내 반복 패턴 감지 - WhisperLiveKit 묵음 구간 문제 해결
+    // "2회 국무회의 시작 2회 국무회의 시작" 같은 반복은 무시
+    const words = rawText.split(/\s+/);
+    if (words.length >= 6) {
+      // 앞 3단어와 뒷부분에서 같은 패턴 찾기
+      const firstThree = words.slice(0, 3).join(' ');
+      const rest = words.slice(3).join(' ');
+      if (rest.includes(firstThree)) {
+        console.log(`[BUFFER] 🔄 반복 패턴 감지 → 스킵: "${rawText.substring(0, 40)}..."`);
+        return;  // 반복 텍스트 무시
+      }
+    }
+    
+    // ★ 1. 할루시네이션 필터 - 2단계 체크
+    // [advice from AI] Step 1: 강력한 할루시네이션 패턴 (길이 무관, 항상 체크)
+    // "시청해주셔서 감사합니다", "다음 영상에서 만나요" 등
+    if (isStrongHallucination(rawText)) {
+      console.log(`[BUFFER] 🚫 강력한 할루시네이션: "${rawText}" (${rawText.length}자)`);
+      sendSTTLog({
+        log_type: 'FILTER',
+        raw_text: rawText,
+        processed_text: '(strong hallucination filtered)',
+        video_time: videoPlayerRef.current?.getVideoElement()?.currentTime || 0,
+        extra: { reason: 'strong_hallucination' }
+      });
+      return;  // 화면에 표시하지 않음
+    }
+    
+    // [advice from AI] Step 2: 일반 할루시네이션 (10자 미만일 때만)
     if (rawText.length < 10) {
       const isHallucinationResult = isHallucination(rawText);
       if (isHallucinationResult) {
         console.log(`[BUFFER] 🚫 할루시네이션 스킵: "${rawText}" (${rawText.length}자)`);
-        
-        // ★ 필터링된 것도 백엔드 로그에 기록 (분석용)
         sendSTTLog({
           log_type: 'FILTER',
           raw_text: rawText,
@@ -614,7 +657,6 @@ function App() {
           video_time: videoPlayerRef.current?.getVideoElement()?.currentTime || 0,
           extra: { reason: 'hallucination' }
         });
-        
         return;  // 화면에 표시하지 않음
       }
     }
@@ -642,33 +684,86 @@ function App() {
     }
     lastLiveSpeakerRef.current = buffer.speaker;
     
-    // ★ 3. 핵심 로직: 버퍼 연속성 체크
+    // ★ 3. 핵심 로직: "공통 접두사 기반 연속성 판단" (근본적 해결)
+    // - 공통 접두사 >= min(len1, len2) * 0.3: 같은 segment의 수정 (대체!)
+    // - 그렇지 않으면: 새 segment 시작 (이전 buffer 완료 처리)
     let newDisplayText: string;
+    let isModification = false;  // Whisper가 같은 구간을 수정 중인지
     
-    if (prevBuffer && rawText.startsWith(prevBuffer)) {
-      // 연속: "경례"→"경례합니다"
-      newDisplayText = lastCompletedTextRef.current ? lastCompletedTextRef.current + ' ' + rawText : rawText;
-    } else if (prevBuffer && prevBuffer.length > 1) {
-      const checkLen = Math.min(5, prevBuffer.length);
-      const prevTail = prevBuffer.slice(-checkLen);
-      
-      if (!rawText.includes(prevTail)) {
-        // 새 인식 시작
-        lastCompletedTextRef.current = (lastCompletedTextRef.current + ' ' + prevBuffer).trim();
-        newDisplayText = lastCompletedTextRef.current + ' ' + rawText;
-                } else {
-        newDisplayText = lastCompletedTextRef.current ? lastCompletedTextRef.current + ' ' + rawText : rawText;
+    if (prevBuffer && prevBuffer.length > 0) {
+      // [advice from AI] Case 1: 새 버퍼가 이전 버퍼로 시작 → 연속 (확실한 추가)
+      if (rawText.startsWith(prevBuffer)) {
+        isModification = true;  // 수정/연속으로 처리 (대체)
       }
+      // [advice from AI] Case 2: 이전 버퍼가 새 버퍼로 시작 → 수정 (짧아진 경우)
+      else if (prevBuffer.startsWith(rawText)) {
+        isModification = true;  // Whisper가 다시 인식 중
+      }
+      // [advice from AI] Case 3: 공통 접두사 기반 판단
+      else {
+        const commonPrefixLen = getCommonPrefixLength(prevBuffer, rawText);
+        const minLen = Math.min(prevBuffer.length, rawText.length);
+        const threshold = minLen * 0.3;  // 30% 이상 공통이면 수정으로 판단
+        
+        if (commonPrefixLen >= threshold && commonPrefixLen >= 2) {
+          // 충분히 공통 부분이 있음 → 같은 segment의 수정
+          isModification = true;
+        }
+      }
+    }
+    
+    if (isModification || !prevBuffer) {
+      // ★ 수정 또는 첫 버퍼: 이전 버퍼를 완료 텍스트에 추가하지 않음!
+      newDisplayText = lastCompletedTextRef.current 
+        ? lastCompletedTextRef.current + ' ' + rawText 
+        : rawText;
     } else {
-      newDisplayText = lastCompletedTextRef.current ? lastCompletedTextRef.current + ' ' + rawText : rawText;
+      // ★ 새 segment: 이전 버퍼를 완료 텍스트에 추가
+      // 단, 중복 방지를 위해 유사도 체크
+      const trimmedPrev = prevBuffer.trim();
+      const existingCompleted = lastCompletedTextRef.current;
+      
+      // [advice from AI] 이전 완료 텍스트 끝부분과 새로 추가할 텍스트의 유사도 체크
+      let shouldAddPrevBuffer = true;
+      if (existingCompleted && trimmedPrev) {
+        // 끝 부분이 비슷하면 중복 → 추가 X
+        const existingTail = existingCompleted.slice(-trimmedPrev.length);
+        const commonLen = getCommonPrefixLength(existingTail, trimmedPrev);
+        if (commonLen >= trimmedPrev.length * 0.5) {
+          shouldAddPrevBuffer = false;  // 중복이므로 추가 안 함
+          console.log(`[BUFFER] ⏭️ 완료 텍스트 중복 스킵: "${trimmedPrev.substring(0, 20)}..."`);
+        }
+      }
+      
+      if (shouldAddPrevBuffer) {
+        lastCompletedTextRef.current = (existingCompleted + ' ' + trimmedPrev).trim();
+      }
+      newDisplayText = lastCompletedTextRef.current + ' ' + rawText;
     }
     
     lastBufferTextRef.current = rawText;
-    displayTextRef.current = newDisplayText.trim();
+    
+    // [advice from AI] ★ displayText에 반복 패턴이 있으면 정리
+    let cleanedDisplayText = newDisplayText.trim();
+    // 같은 문장이 연속으로 반복되면 첫 번째만 유지
+    const sentences = cleanedDisplayText.split(/(?<=[.?!])\s*/);
+    const uniqueSentences: string[] = [];
+    const seenSentences = new Set<string>();
+    for (const s of sentences) {
+      const normalized = s.trim().toLowerCase();
+      if (normalized && !seenSentences.has(normalized)) {
+        seenSentences.add(normalized);
+        uniqueSentences.push(s.trim());
+      }
+    }
+    cleanedDisplayText = uniqueSentences.join(' ');
+    displayTextRef.current = cleanedDisplayText;
     
     // ★ 4. 화면에 2줄로 표시 (liveSubtitleLines 업데이트)
-    // [advice from AI] 화면 표시용에도 후처리 + 반복제거 적용!
-    const displayTextProcessed = postprocessText(displayTextRef.current, false) || displayTextRef.current;
+    // [advice from AI] 화면 표시용 - 후처리 ON/OFF에 따라 분기
+    const displayTextProcessed = subtitleRules.postprocess_enabled
+      ? (postprocessText(displayTextRef.current, false) || displayTextRef.current)
+      : displayTextRef.current;
     
     // [advice from AI] ★ 화면 자막 원본/후처리 비교 → 백엔드 로그
     // 5회마다 1번 전송 (성능 최적화, 충분한 샘플링)
@@ -799,7 +894,7 @@ function App() {
       lastBufferForListRef.current = '';
       bufferStartTimeRef.current = currentTimeRef.current;
     }, BUFFER_CONFIRM_TIMEOUT);
-  }, [updateDisplayLines, SUBTITLE_FADE_TIMEOUT, BUFFER_CONFIRM_TIMEOUT, isRecentlyAdded, addToRecentTexts]);
+  }, [updateDisplayLines, SUBTITLE_FADE_TIMEOUT, BUFFER_CONFIRM_TIMEOUT, isRecentlyAdded, addToRecentTexts, subtitleRules.postprocess_enabled]);
 
   // [advice from AI] 비디오 오디오 직접 캡처 → WhisperLiveKit 실시간 STT
   const { 

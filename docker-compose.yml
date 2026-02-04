@@ -44,13 +44,8 @@ services:
     # [advice from AI] --pcm-input: FFmpeg 없이 직접 PCM 수신 (안정성 향상)
     # [advice from AI] --backend-policy localagreement: 안정적인 정책 사용
     # [advice from AI] --init-prompt: 컨텍스트 힌트로 인식 정확도 향상
-    command: >
-      whisperlivekit-server
-      --model large-v3
-      --language ko
-      --pcm-input
-      --backend-policy localagreement
-      --init-prompt "국무회의, 국민의례, 경례, 대통령, 국무총리, 장관, 정책, 예산, 법안, 의결"
+    # [advice from AI] Dockerfile ENTRYPOINT가 "whisperlivekit-server --host 0.0.0.0"이므로 command는 추가 인수만 전달
+    command: ["--model", "large-v3", "--language", "ko", "--pcm-input", "--backend-policy", "localagreement", "--init-prompt", "국무회의, 국민의례, 경례, 대통령, 국무총리, 장관, 정책, 예산, 법안, 의결"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]

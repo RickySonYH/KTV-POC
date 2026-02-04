@@ -177,13 +177,13 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
               {/* [advice from AI] 실시간 오디오 캡처용 자막 (최우선) - 2줄 고정 */}
               {liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]) ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {/* 윗줄 (이전에 완성된 20자) */}
+                  {/* [advice from AI] 윗줄 - 두 줄 모두 동일 스타일 (흐림 제거) */}
                   {liveSubtitleLines[0] && (
-                    <div style={{ opacity: 0.7 }}>
+                    <div>
                       <span style={{
                         color: '#fff',
-                        fontSize: '18px',
-                        fontWeight: '400',
+                        fontSize: '20px',
+                        fontWeight: '500',
                         lineHeight: '1.4',
                         textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
                       }}>
@@ -191,35 +191,35 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                       </span>
                     </div>
                   )}
-                  {/* 아랫줄 (현재 쌓이는 중인 텍스트) */}
+                  {/* [advice from AI] 아랫줄 - 두 줄 모두 동일 스타일 */}
                   {liveSubtitleLines[1] && (
-                    <div>
-                      <span style={{
-                        color: '#fff',
-                        fontSize: '22px',
-                        fontWeight: '600',
-                        lineHeight: '1.4',
-                        textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
-                      }}>
+                  <div>
+                    <span style={{
+                      color: '#fff',
+                      fontSize: '20px',
+                      fontWeight: '500',
+                      lineHeight: '1.4',
+                      textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
+                    }}>
                         {liveSubtitleLines[1]}
                         {/* 입력 중 커서 표시 */}
                         {isProcessing && (
-                          <span style={{
-                            display: 'inline-block',
-                            width: '2px',
-                            height: '1.2em',
-                            background: '#fff',
-                            marginLeft: '2px',
-                            verticalAlign: 'middle',
-                            animation: 'blink 0.7s infinite'
-                          }} />
-                        )}
-                      </span>
-                    </div>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '2px',
+                          height: '1.2em',
+                          background: '#fff',
+                          marginLeft: '2px',
+                          verticalAlign: 'middle',
+                          animation: 'blink 0.7s infinite'
+                        }} />
+                      )}
+                    </span>
+                  </div>
                   )}
                 </div>
               ) : subtitleLines.length > 0 ? (
-                /* [advice from AI] 기존 2줄 자막 시스템 */
+                /* [advice from AI] 기존 2줄 자막 시스템 - 두 줄 모두 동일한 스타일로 표시 */
                 subtitleLines.map((line, idx) => (
                   <div 
                     key={line.id} 
@@ -227,9 +227,9 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '8px',
-                      opacity: line.fading ? 0 : (idx === 0 && subtitleLines.length > 1 ? 0.6 : 1),
+                      opacity: line.fading ? 0 : 1,  // [advice from AI] 흐림 제거 - 두 줄 모두 100%
                       transform: line.fading ? 'translateY(-10px)' : 'translateY(0)',
-                      transition: 'all 0.5s ease',  // 페이드 애니메이션
+                      transition: 'all 0.5s ease',
                     }}
                   >
                     {line.speaker && idx === subtitleLines.length - 1 && (
@@ -248,8 +248,8 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
                     )}
                     <span style={{
                       color: '#fff',
-                      fontSize: idx === subtitleLines.length - 1 ? '22px' : '17px',
-                      fontWeight: idx === subtitleLines.length - 1 ? '600' : '400',
+                      fontSize: '20px',  // [advice from AI] 두 줄 동일 크기
+                      fontWeight: '500',  // [advice from AI] 두 줄 동일 굵기
                       lineHeight: '1.4',
                       textShadow: '1px 1px 3px rgba(0,0,0,0.7)'
                     }}>

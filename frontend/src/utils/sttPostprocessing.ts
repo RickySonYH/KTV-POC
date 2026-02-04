@@ -301,10 +301,18 @@ const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; descrip
   // [advice from AI] ★ 추가 오인식 패턴 (로그 분석 기반)
   // "먼저 국민들에게 전해드리겠습니다" → "먼저 국민의례를 하겠습니다"
   { pattern: /먼저\s*국민들에게\s*전해드리겠습니다/gi, replacement: '먼저 국민의례를 하겠습니다', description: '국민의례 오인식2' },
-  // [advice from AI] ★ 롤백: "공략을" 패턴은 너무 일반적 → 오탐 가능성 높음
-  // 대신 관리페이지의 "정부 용어 사전"에서 영상별로 동적 관리 권장
+  // ★ "먼저 공략을 해보겠습니다" → "먼저 국민의례를 하겠습니다" (자주 발생!)
+  { pattern: /먼저\s*공략을\s*해보겠습니다/gi, replacement: '먼저 국민의례를 하겠습니다', description: '국민의례 공략 오인식' },
+  { pattern: /공략을\s*해보겠습니다/gi, replacement: '국민의례를 하겠습니다', description: '국민의례 공략 오인식2' },
+  // [advice from AI] ★ "수피" → "코스피" (Whisper 오인식)
+  { pattern: /수피\s*고스닥/gi, replacement: '코스피 코스닥', description: '코스피 오인식' },
+  { pattern: /수피\s*코스닥/gi, replacement: '코스피 코스닥', description: '코스피 오인식2' },
+  { pattern: /^수피$/gi, replacement: '코스피', description: '코스피 단독 오인식' },
+  // ★ "국민의뢰를" → "국민의례를" (단독 패턴 추가!)
+  { pattern: /국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰 단독 오인식' },
+  { pattern: /국민의뢰/gi, replacement: '국민의례', description: '국민의뢰 오인식' },
   // "국민을 국민의뢰를" → "국민의례를" (의뢰 오인식)
-  { pattern: /국민을?\s*국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰 오인식' },
+  { pattern: /국민을?\s*국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
   // "이는 성장과 이는 성장의" → "이는 성장의" (반복)
   { pattern: /이는\s*성장과\s*이는\s*성장의/gi, replacement: '이는 성장의', description: '반복 제거' },
   // "전반 전반으로" → "전반으로" (반복)
@@ -312,6 +320,25 @@ const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; descrip
   // "홀떼받은 홀떼받던" → "홀대받던" (오타 + 반복)
   { pattern: /홀떼받은\s*홀떼받던/gi, replacement: '홀대받던', description: '오타 수정' },
   { pattern: /홀떼받/gi, replacement: '홀대받', description: '오타 수정' },
+  
+  // [advice from AI] ★ 로그 분석 기반 추가 오인식 패턴 (2026-02-04)
+  // "공모회의" → "국무회의"
+  { pattern: /공모회의/gi, replacement: '국무회의', description: '국무회의 오인식' },
+  // "아멘" → "네" (국무회의에서 아멘은 오인식) - 단독 및 문장 시작
+  { pattern: /^아멘$/gi, replacement: '네', description: '아멘 단독 오인식' },
+  { pattern: /^아멘\s/gi, replacement: '네, ', description: '아멘 문장시작 오인식' },
+  { pattern: /아멘\s*고생/gi, replacement: '네, 고생', description: '아멘 고생 오인식' },
+  // "개선언" → "개회선언"
+  { pattern: /개선언/gi, replacement: '개회선언', description: '개회선언 오인식' },
+  // "국물을" → 문맥에 따라 "국민을" (국민의례 앞에서)
+  { pattern: /국물을\s*국민/gi, replacement: '국민', description: '국물을 오인식' },
+  // "공룡" → 삭제 (의미 없는 오인식)
+  { pattern: /\s*공룡\s*/gi, replacement: ' ', description: '공룡 오인식 삭제' },
+  // "부의 해당되는데" → "부에 해당되는데"
+  { pattern: /부의\s*해당/gi, replacement: '부에 해당', description: '부의 오인식' },
+  // "신년" → "새해" or 그대로 (신년이 맞으면 그대로)
+  // "쳐도 회의를" → "저도 회의를" (저 → 쳐 오인식)
+  { pattern: /쳐도\s*회의/gi, replacement: '저도 회의', description: '쳐도 오인식' },
 ];
 
 function applyContextCorrections(text: string): string {
@@ -436,7 +463,29 @@ const STRONG_HALLUCINATION_PATTERNS: RegExp[] = [
   /^감사합니다\.?$/i,   // 단독 "감사합니다"
   /^많은$/i,            // 단독 "많은"
   /^3회$/i,             // 단독 "3회" (국무회의 오인식)
+  /이\s*시각\s*세계였습니다/i,  // "이 시각 세계였습니다" (오인식)
+  /^것처럼$/i,          // 단독 "것처럼" (잘린 인식)
+  /^것\s*같습니다\.?$/i,  // 단독 "것 같습니다"
+  /^있는\s*겁니다\.?$/i,  // 단독 "있는 겁니다"
+  /^되겠습니다\.?$/i,   // 단독 "되겠습니다"
+  /^것입니다\.?$/i,     // 단독 "것입니다"
 ];
+
+/**
+ * [advice from AI] ★ 강력한 할루시네이션 체크 - 길이와 관계없이 항상 필터
+ * handleBufferUpdate에서 사용
+ */
+export function isStrongHallucination(text: string): boolean {
+  if (!text) return true;
+  const trimmed = text.trim();
+  
+  for (const pattern of STRONG_HALLUCINATION_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * 전체 후처리 파이프라인
