@@ -35,3 +35,15 @@ nginx/certs/
 .env
 .env.local
 .env.*.local
+
+# Large model files
+*.bin
+*.tar
+*.zip
+models/
+whisper-livekit-package/models/
+output/
+기획안
+적재방식의*
+wl3_*.zip
+ktv_model_configs.zip

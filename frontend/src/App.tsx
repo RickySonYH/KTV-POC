@@ -59,6 +59,24 @@ function App() {
   const [video, setVideo] = useState<VideoFile | null>(null);
   // [advice from AI] 자막 목록 - 기록 로직 제거됨, UI용으로만 유지
   const [displayedSubtitles, setDisplayedSubtitles] = useState<SubtitleSegment[]>([]);
+  
+  // [advice from AI] ★★★ 성능 최적화: 자막 목록 추가를 배치 큐로 처리 ★★★
+  // 화면 표시는 즉시, 목록 기록은 1초마다 배치 처리 → 화면 렌더링 우선
+  const pendingSubtitlesRef = useRef<SubtitleSegment[]>([]);
+  
+  // [advice from AI] 1초마다 대기 중인 자막을 목록에 추가 (낮은 우선순위)
+  useEffect(() => {
+    const flushInterval = setInterval(() => {
+      if (pendingSubtitlesRef.current.length > 0) {
+        const toAdd = [...pendingSubtitlesRef.current];
+        pendingSubtitlesRef.current = [];
+        setDisplayedSubtitles(prev => [...prev, ...toAdd]);
+      }
+    }, 1000);  // 1초마다 배치 처리
+    
+    return () => clearInterval(flushInterval);
+  }, []);
+  
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [status, setStatus] = useState<ProcessStatus>('idle');
@@ -613,34 +631,37 @@ function App() {
     }
     
     // ========== 2. 후처리 함수 ==========
-    const processLineText = (text: string, speaker: number): string => {
+    const processLineText = (text: string): string => {
       if (!text) return '';
       const processed = subtitleRules.postprocess_enabled
         ? (postprocessText(text, true) || '').trim()
         : text.trim();
-      if (!processed) return '';
-      
-      // 화자 변경 시 '-' 추가
-      if (lastGraduatedSpeakerRef.current >= 0 && 
-          speaker >= 0 && 
-          speaker !== lastGraduatedSpeakerRef.current) {
-        return '- ' + processed;
-      }
       return processed;
     };
     
     // ========== 3. 전체 lines 텍스트 수집 ==========
+    // [advice from AI] ★★★ 화자 변경 감지: 이전 line과 직접 비교 (항상 동일한 결과 보장) ★★★
     let allConfirmedText = '';
+    let prevLineSpeaker = -1;  // 이전 line의 speaker (lines 배열 내에서 비교)
+    
     for (const line of lines) {
       if (line && line.text?.trim() && line.speaker !== -2) {
-        const processed = processLineText(line.text, line.speaker);
+        const processed = processLineText(line.text);
         if (processed) {
+          // [advice from AI] ★★★ 화자 변경 시 '-' 추가 (이전 line과 비교 - 항상 일관됨) ★★★
+          const speakerChanged = prevLineSpeaker >= 0 && 
+                                  line.speaker >= 0 && 
+                                  line.speaker !== prevLineSpeaker;
+          
           if (allConfirmedText) {
-            allConfirmedText += ' ' + processed;
+            allConfirmedText += speakerChanged ? ' - ' + processed : ' ' + processed;
           } else {
             allConfirmedText = processed;
           }
+          
+          // 현재 line의 speaker 기록 (다음 line과 비교용)
           if (line.speaker >= 0) {
+            prevLineSpeaker = line.speaker;
             lastGraduatedSpeakerRef.current = line.speaker;
           }
         }
@@ -679,8 +700,10 @@ function App() {
       // 현재 블록 = 이전 미완성 부분 + 새 텍스트
       currentBlockRef.current = allConfirmedText.slice(alreadyGraduatedLength - blockOffset);
       
-      // 30자 넘으면 졸업!
-      while (currentBlockRef.current.length >= CHARS_PER_LINE) {
+      // [advice from AI] ★★★ 성능 개선: 한 번에 1개 블록만 졸업! ★★★
+      // while → if 변경: 나머지는 다음 업데이트에서 자연스럽게 분산 처리
+      // 이렇게 하면 한꺼번에 우르르 몰려나오는 현상 방지
+      if (currentBlockRef.current.length >= CHARS_PER_LINE) {
         // 앞 30자 → 졸업
         const graduatingText = currentBlockRef.current.slice(0, CHARS_PER_LINE);
         graduatedBlockRef.current = graduatingText;
@@ -689,35 +712,35 @@ function App() {
         
         // [advice from AI] ★★★ 중복 체크 - 앞 15자 기준 ★★★
         const checkKey = graduatingText.slice(0, 15);
-        if (graduatedTextsRef.current.has(checkKey)) {
+        if (!graduatedTextsRef.current.has(checkKey)) {
+          // 졸업 텍스트 기록 (앞 15자로)
+          graduatedTextsRef.current.add(checkKey);
+          graduatedTotalLengthRef.current += CHARS_PER_LINE;
+          
+          // [advice from AI] ★★★ 졸업 이벤트 → 자막 목록에 기록! ★★★
+          // 시간은 현재 비디오 시간 기준
+          const startTime = blockJsonStartRef.current;
+          const endTime = currentTimeRef.current;
+          
+          segmentIdRef.current += 1;
+          
+          // [advice from AI] ★★★ 성능 최적화: 큐에 추가만 하고 즉시 반환 ★★★
+          // 실제 목록 추가는 1초마다 배치 처리됨 → 화면 렌더링 우선!
+          const subtitle: SubtitleSegment = {
+            id: segmentIdRef.current,
+            startTime: startTime,
+            endTime: endTime,
+            text: graduatingText,
+            speaker: lastGraduatedSpeakerRef.current >= 0 ? `화자${lastGraduatedSpeakerRef.current + 1}` : undefined,
+          };
+          pendingSubtitlesRef.current.push(subtitle);  // 큐에 추가만! (setState 없음)
+          
+          // 다음 블록의 시작 시간 갱신
+          blockJsonStartRef.current = endTime;
+        } else {
           console.log(`[졸업] ⏭️ 중복 스킵: "${graduatingText.substring(0, 20)}..."`);
           graduatedTotalLengthRef.current += CHARS_PER_LINE;
-          continue;
         }
-        
-        // 졸업 텍스트 기록 (앞 15자로)
-        graduatedTextsRef.current.add(checkKey);
-        graduatedTotalLengthRef.current += CHARS_PER_LINE;
-        
-        // [advice from AI] ★★★ 졸업 이벤트 → 자막 목록에 기록! ★★★
-        // 시간은 현재 비디오 시간 기준
-        const startTime = blockJsonStartRef.current;
-        const endTime = currentTimeRef.current;
-        
-        segmentIdRef.current += 1;
-        const subtitle: SubtitleSegment = {
-          id: segmentIdRef.current,
-          startTime: startTime,
-          endTime: endTime,
-          text: graduatingText,
-          speaker: lastGraduatedSpeakerRef.current >= 0 ? `화자${lastGraduatedSpeakerRef.current + 1}` : undefined,
-        };
-        
-        setDisplayedSubtitles(prev => [...prev, subtitle]);
-        console.log(`[졸업] 🎓 자막목록 추가: "${graduatingText.substring(0, 25)}..." [${startTime.toFixed(2)}s~${endTime.toFixed(2)}s]`);
-        
-        // 다음 블록의 시작 시간 갱신
-        blockJsonStartRef.current = endTime;
       }
     }
     

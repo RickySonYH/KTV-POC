@@ -418,7 +418,9 @@ const CONTEXT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string; descrip
   { pattern: /수피\s*코스닥/gi, replacement: '코스피 코스닥', description: '코스피 오인식2' },
   { pattern: /^수피$/gi, replacement: '코스피', description: '코스피 단독 오인식' },
   // ★ "국민의뢰를" → "국민의례를" (단독 패턴 추가!)
-  { pattern: /국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰 단독 오인식' },
+  // [advice from AI] 순서 중요: "국민의뢰를"을 먼저 처리 후 "국민의뢰" 처리
+  { pattern: /국민의뢰를/gi, replacement: '국민의례를', description: '국민의뢰를 오인식' },
+  { pattern: /국민\s*의뢰/gi, replacement: '국민의례', description: '국민 의뢰 오인식 (띄어쓰기 포함)' },
   { pattern: /국민의뢰/gi, replacement: '국민의례', description: '국민의뢰 오인식' },
   // "국민을 국민의뢰를" → "국민의례를" (의뢰 오인식)
   { pattern: /국민을?\s*국민의례를/gi, replacement: '국민의례를', description: '국민의례 중복' },
@@ -622,7 +624,7 @@ const BROADCAST_HALLUCINATION_PATTERNS: RegExp[] = [
 const RELIGIOUS_HALLUCINATION_PATTERNS: RegExp[] = [
   /^아멘\.?$/i,
   /^할렐루야\.?$/i,
-  /^하나님\.?$/i,
+  /하나님/i,  // [advice from AI] 더 포괄적으로 변경 - '하나님'이 포함된 모든 텍스트
   /^주님\.?$/i,
   /기도합니다\.?$/i,
   /축복합니다\.?$/i,
@@ -733,6 +735,8 @@ const STRONG_HALLUCINATION_PATTERNS: RegExp[] = [
   /후원\s*[:|\-]/i,
   /스폰서\s*[:|\-]/i,
   /제공\s*[:|\-]/i,
+  /자막\s*제공.*배달의민족/i,  // [advice from AI] 할루시네이션 추가
+  /배달의민족/i,  // [advice from AI] 할루시네이션 추가
   /저작권/i,
   /무단\s*(복제|전재|배포)/i,
   /all\s*rights?\s*reserved/i,
