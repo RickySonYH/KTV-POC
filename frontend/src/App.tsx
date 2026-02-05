@@ -292,6 +292,17 @@ function App() {
   const currentBlockRef = useRef<string>('');        // 하단 = 현재 채우는 중 (0~30자)
   const lastProcessedTextRef = useRef<string>('');   // 마지막으로 처리한 전체 텍스트
   const CHARS_PER_LINE = 30;     // 한 줄당 글자 수
+  
+  // [advice from AI] ★★★ 30자 블록 JSON 시간 추적 ★★★
+  // - blockJsonStartRef: 30자 블록 시작 시 첫 lines의 JSON start 시간
+  // - blockJsonEndRef: 마지막 lines의 JSON end 시간 (계속 업데이트)
+  const blockJsonStartRef = useRef<number>(0);       // 블록 시작 시간 (JSON)
+  const blockJsonEndRef = useRef<number>(0);         // 블록 끝 시간 (JSON)
+  const blockStartedRef = useRef<boolean>(false);    // 블록 시작 여부
+  
+  // [advice from AI] ★★★ 졸업된 텍스트 중복 방지 ★★★
+  const graduatedTextsRef = useRef<Set<string>>(new Set());
+  const graduatedTotalLengthRef = useRef<number>(0);  // 지금까지 졸업한 총 글자 수
 
   // [advice from AI] ★ 버퍼 타임아웃 기반 자막 확정
   // - WhisperLiveKit의 lines가 잘 안 오는 문제 대응
@@ -585,14 +596,20 @@ function App() {
     }
     
     // ========== 1. lines 리셋 감지 ==========
+    // [advice from AI] ★★★ 핵심: lines가 리셋되어도 graduatedTotalLengthRef와 graduatedBlockRef는 유지! ★★★
     if (lines.length < lastLinesRef.current.length) {
-      console.log(`[lines] 🔄 리셋: ${lastLinesRef.current.length} → ${lines.length}`);
+      console.log(`[lines] 🔄 리셋: ${lastLinesRef.current.length} → ${lines.length} (졸업 총길이: ${graduatedTotalLengthRef.current}자 유지)`);
       lastLinesRef.current = [];
       addedToListIndexRef.current = -1;
-      graduatedBlockRef.current = '';      // 상단 블록 초기화
-      currentBlockRef.current = '';        // 하단 블록 초기화
-      lastProcessedTextRef.current = '';   // 처리 기록 초기화
+      // [advice from AI] graduatedBlockRef는 유지! (화면에 졸업 텍스트 계속 표시)
+      // graduatedBlockRef.current = '';  // 유지!
+      currentBlockRef.current = '';
+      lastProcessedTextRef.current = '';
       collectorStartTimeRef.current = currentTimeRef.current;
+      // JSON 시간 ref 초기화
+      blockJsonStartRef.current = currentTimeRef.current;  // 현재 비디오 시간으로
+      blockJsonEndRef.current = currentTimeRef.current;
+      blockStartedRef.current = false;
     }
     
     // ========== 2. 후처리 함수 ==========
@@ -631,38 +648,80 @@ function App() {
     }
     
     // ========== 4. 30자 블록 졸업 시스템 ==========
-    // [advice from AI] ★★★ 핵심: 하단 30자 차면 → 상단으로 졸업 → 하단 비우고 새로 시작 ★★★
+    // [advice from AI] ★★★ 핵심: 졸업한 총 길이를 추적해서 중복 방지 ★★★
     
-    // 새로 추가된 텍스트 계산
-    const prevText = lastProcessedTextRef.current;
-    let newText = '';
+    // 전체 텍스트 길이와 이미 졸업한 길이 비교
+    const totalTextLength = allConfirmedText.length;
+    const alreadyGraduatedLength = graduatedTotalLengthRef.current;
     
-    if (allConfirmedText.startsWith(prevText)) {
-      // 텍스트가 확장됨 (정상적인 추가)
-      newText = allConfirmedText.slice(prevText.length);
+    // 이미 졸업한 부분은 스킵하고, 새로운 부분만 처리
+    if (totalTextLength <= alreadyGraduatedLength) {
+      // 이미 다 처리한 텍스트 → 새 졸업 없음
+      // 하지만 화면 표시용 블록은 업데이트 (graduatedBlockRef는 유지!)
+      const displayOffset = alreadyGraduatedLength % CHARS_PER_LINE;
+      currentBlockRef.current = allConfirmedText.slice(Math.max(0, totalTextLength - displayOffset));
+      // graduatedBlockRef는 그대로 유지 (이미 졸업한 텍스트 표시)
     } else {
-      // 텍스트가 수정되거나 리셋됨 → 전체를 새 텍스트로
-      newText = allConfirmedText;
-      currentBlockRef.current = '';
-      graduatedBlockRef.current = '';
-    }
-    
-    lastProcessedTextRef.current = allConfirmedText;
-    
-    // 새 텍스트를 현재 블록에 추가
-    if (newText) {
-      currentBlockRef.current += newText;
+      // 새로운 텍스트가 있음
+      // 현재 블록 위치 계산: (이미 졸업한 길이) % 30
+      const blockOffset = alreadyGraduatedLength % CHARS_PER_LINE;
+      
+      // 새로 추가된 부분만 추출
+      const newPartStart = Math.max(alreadyGraduatedLength, 0);
+      const newText = allConfirmedText.slice(newPartStart);
+      
+      // 블록 시작 시간 기록 (첫 졸업 전)
+      if (!blockStartedRef.current) {
+        blockJsonStartRef.current = currentTimeRef.current;
+        blockStartedRef.current = true;
+      }
+      
+      // 현재 블록 = 이전 미완성 부분 + 새 텍스트
+      currentBlockRef.current = allConfirmedText.slice(alreadyGraduatedLength - blockOffset);
       
       // 30자 넘으면 졸업!
       while (currentBlockRef.current.length >= CHARS_PER_LINE) {
-        // 앞 30자 → 상단으로 졸업
-        graduatedBlockRef.current = currentBlockRef.current.slice(0, CHARS_PER_LINE);
-        // 나머지 → 하단에서 새로 시작
+        // 앞 30자 → 졸업
+        const graduatingText = currentBlockRef.current.slice(0, CHARS_PER_LINE);
+        graduatedBlockRef.current = graduatingText;
+        // 나머지 → 다음 블록
         currentBlockRef.current = currentBlockRef.current.slice(CHARS_PER_LINE);
         
-        console.log(`[졸업] 🎓 상단으로 이동: "${graduatedBlockRef.current}"`);
+        // [advice from AI] ★★★ 중복 체크 - 앞 15자 기준 ★★★
+        const checkKey = graduatingText.slice(0, 15);
+        if (graduatedTextsRef.current.has(checkKey)) {
+          console.log(`[졸업] ⏭️ 중복 스킵: "${graduatingText.substring(0, 20)}..."`);
+          graduatedTotalLengthRef.current += CHARS_PER_LINE;
+          continue;
+        }
+        
+        // 졸업 텍스트 기록 (앞 15자로)
+        graduatedTextsRef.current.add(checkKey);
+        graduatedTotalLengthRef.current += CHARS_PER_LINE;
+        
+        // [advice from AI] ★★★ 졸업 이벤트 → 자막 목록에 기록! ★★★
+        // 시간은 현재 비디오 시간 기준
+        const startTime = blockJsonStartRef.current;
+        const endTime = currentTimeRef.current;
+        
+        segmentIdRef.current += 1;
+        const subtitle: SubtitleSegment = {
+          id: segmentIdRef.current,
+          startTime: startTime,
+          endTime: endTime,
+          text: graduatingText,
+          speaker: lastGraduatedSpeakerRef.current >= 0 ? `화자${lastGraduatedSpeakerRef.current + 1}` : undefined,
+        };
+        
+        setDisplayedSubtitles(prev => [...prev, subtitle]);
+        console.log(`[졸업] 🎓 자막목록 추가: "${graduatingText.substring(0, 25)}..." [${startTime.toFixed(2)}s~${endTime.toFixed(2)}s]`);
+        
+        // 다음 블록의 시작 시간 갱신
+        blockJsonStartRef.current = endTime;
       }
     }
+    
+    lastProcessedTextRef.current = allConfirmedText;
     
     const topLine = graduatedBlockRef.current;
     const bottomLine = currentBlockRef.current;
@@ -777,6 +836,18 @@ function App() {
     middleLineRef.current = '';
     collectorLineRef.current = '';  // 수집창
     collectorAccumulatedRef.current = '';  // 누적 텍스트
+    
+    // [advice from AI] 30자 블록 JSON 시간 ref 초기화
+    blockJsonStartRef.current = 0;
+    blockJsonEndRef.current = 0;
+    blockStartedRef.current = false;
+    graduatedBlockRef.current = '';
+    currentBlockRef.current = '';
+    lastProcessedTextRef.current = '';
+    lastLinesRef.current = [];
+    addedToListIndexRef.current = -1;
+    graduatedTextsRef.current.clear();  // 졸업 텍스트 중복 체크 초기화
+    graduatedTotalLengthRef.current = 0;  // 졸업 총 길이 초기화
     
     // [advice from AI] 버퍼 타임아웃 ref 초기화
     lastBufferForListRef.current = '';
