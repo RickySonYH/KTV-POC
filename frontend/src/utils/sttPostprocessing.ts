@@ -737,6 +737,8 @@ const STRONG_HALLUCINATION_PATTERNS: RegExp[] = [
   /제공\s*[:|\-]/i,
   /자막\s*제공.*배달의민족/i,  // [advice from AI] 할루시네이션 추가
   /배달의민족/i,  // [advice from AI] 할루시네이션 추가
+  /기상캐스터\s*배혜지/i,  // [advice from AI] 할루시네이션 추가
+  /배혜지/i,  // [advice from AI] 할루시네이션 추가
   /저작권/i,
   /무단\s*(복제|전재|배포)/i,
   /all\s*rights?\s*reserved/i,
