@@ -12,12 +12,28 @@ interface SubtitleLine {
   fading?: boolean;
 }
 
+// [advice from AI] ★ 화자별 색상 + 라벨
+const SPEAKER_COLORS: Record<number, string> = {
+  0: '#4FC3F7',  // 화자1 - 파란
+  1: '#81C784',  // 화자2 - 초록
+  2: '#FFB74D',  // 화자3 - 주황
+  3: '#CE93D8',  // 화자4 - 보라
+};
+const SPEAKER_LABELS: Record<number, string> = {
+  0: '화자1',
+  1: '화자2',
+  2: '화자3',
+  3: '화자4',
+};
+
 interface VideoPlayerProps {
   video?: VideoFile | null;
   videoUrl?: string | null;
   currentSpeaker: string | null;
   subtitleLines?: SubtitleLine[];  // [advice from AI] 3줄 자막 시스템용
-  liveSubtitleLines?: string[];  // [advice from AI] 실시간 오디오 캡처용 3줄 자막 (상단, 중간, 하단)
+  // [advice from AI] ★★★ 3줄 자막 + 화자 라벨 ★★★
+  liveSubtitleLines?: Array<{text: string; speaker: number}>;
+  currentLiveSpeaker?: number;
   onTimeUpdate: (currentTime: number) => void;
   onDurationChange: (duration: number) => void;
   onPlay: () => void;
@@ -35,6 +51,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   videoUrl,
   subtitleLines = [],  // [advice from AI] 3줄 자막
   liveSubtitleLines,  // [advice from AI] 실시간 오디오 캡처용 3줄 자막
+  currentLiveSpeaker = -1,  // [advice from AI] ★ 현재 화자 번호
   onTimeUpdate, 
   onDurationChange,
   onPlay,
@@ -42,9 +59,11 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   isProcessing
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);  // [advice from AI] ★ 전체화면 대상
   const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPlayButton, setShowPlayButton] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // [advice from AI] ref 노출
   useImperativeHandle(ref, () => ({
@@ -159,16 +178,41 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     };
   }, [onTimeUpdate, onDurationChange, onPlay, onPause]);
 
+  // [advice from AI] ★★★ 전체화면: container 기준으로 (자막 포함) ★★★
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  // [advice from AI] video 더블클릭 → container fullscreen (자막 포함!)
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    const handleDblClick = (e: Event) => {
+      e.preventDefault();
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else {
+        containerRef.current?.requestFullscreen();
+      }
+    };
+    videoEl.addEventListener('dblclick', handleDblClick);
+    return () => videoEl.removeEventListener('dblclick', handleDblClick);
+  }, []);
+
   return (
     <div className="card" style={{ margin: 0 }}>
-      <div className="video-container" style={{ position: 'relative' }}>
+      <div ref={containerRef} className="video-container" style={{ position: 'relative', background: '#000' }}>
         {/* [advice from AI] HLS는 hls.js가 src 관리, 일반 비디오는 useEffect에서 설정 */}
         <video
           ref={videoRef}
           className="video-player"
           controls
           crossOrigin="anonymous"
-          style={{ width: '100%', maxHeight: '600px', display: 'block', background: '#000', borderRadius: '8px' }}
+          style={{ width: '100%', maxHeight: isFullscreen ? '100vh' : '600px', display: 'block', background: '#000', borderRadius: isFullscreen ? '0' : '8px' }}
         />
         
         {/* [advice from AI] 유튜브 스타일 큰 재생 버튼 (중앙) */}
@@ -210,7 +254,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         {/* [advice from AI] liveSubtitleLines: 상단[0], 중간[1], 수집창[2] - 30자씩 누적 표시 */}
         {/* [advice from AI] ★ [2]도 체크해야 수집창만 있을 때도 컨테이너 표시됨! */}
         {/* [advice from AI] ★★★ 자막창 위치: 화면 중앙, 30자 고정 너비, 텍스트 좌측 정렬 ★★★ */}
-        {(subtitleLines.length > 0 || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]))) && (
+        {(subtitleLines.length > 0 || (liveSubtitleLines && liveSubtitleLines.some(l => l?.text))) && (
           <div style={{
             position: 'absolute',
             bottom: '60px',
@@ -230,86 +274,56 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
               width: '720px',  // [advice from AI] 30자 기준 고정 너비 (24px * 30자)
               minWidth: '720px',
               maxWidth: '720px',
-              textAlign: 'left'  // [advice from AI] 좌에서 우로 텍스트 쓰기
+              textAlign: 'left',  // [advice from AI] 좌에서 우로 텍스트 쓰기
+              border: 'none'
             }}>
-              {/* [advice from AI] 확정 자막 (subtitleLines) 우선 표시 - 화자분리 "-" 적용됨 */}
-              {subtitleLines.length > 0 ? (
-                subtitleLines.map((line) => (
-                  <div 
-                    key={line.id} 
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      opacity: line.fading ? 0 : 1,
-                      transform: line.fading ? 'translateY(-10px)' : 'translateY(0)',
-                      transition: 'all 0.5s ease',
-                      maxWidth: '100%',  // [advice from AI] 한 줄 제한
-                    }}
-                  >
+              {/* [advice from AI] ★★★ TV 방송 스타일 3줄 자막 + 화자 라벨 ★★★ */}
+              {(isProcessing || (liveSubtitleLines && liveSubtitleLines.some(l => l?.text))) ? (
+                <div style={{ display: 'flex', gap: '12px', width: '100%' }}>
+                  {/* [advice from AI] 왼쪽: 화자 라벨 + 색상 바 */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '50px',
+                    borderRight: `3px solid ${currentLiveSpeaker >= 0 ? (SPEAKER_COLORS[currentLiveSpeaker] || '#888') : '#888'}`,
+                    paddingRight: '10px',
+                    transition: 'border-color 0.2s ease',
+                  }}>
                     <span style={{
-                      color: '#fff',
-                      fontSize: '24px',
-                      fontWeight: '600',
-                      lineHeight: '1.4',  // [advice from AI] 줄 간격 축소
-                      letterSpacing: '0.5px',
-                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
-                      whiteSpace: 'nowrap',  // [advice from AI] 한 줄 강제
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      maxWidth: '100%',
+                      color: currentLiveSpeaker >= 0 ? (SPEAKER_COLORS[currentLiveSpeaker] || '#aaa') : '#aaa',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      letterSpacing: '1px',
+                      transition: 'color 0.2s ease',
                     }}>
-                      {line.text}
+                      {currentLiveSpeaker >= 0 ? (SPEAKER_LABELS[currentLiveSpeaker] || `화자${currentLiveSpeaker + 1}`) : ''}
                     </span>
                   </div>
-                ))
-              ) : (isProcessing || (liveSubtitleLines && (liveSubtitleLines[0] || liveSubtitleLines[1]))) ? (
-                // [advice from AI] ★ 60자 FIFO 자막 - 상단(오래된) / 하단(최신)
-                // 부드러운 텍스트 전환 애니메이션 적용
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  gap: '6px', 
-                  minHeight: '30px',
-                  overflow: 'hidden'
-                }}>
-                  {/* [advice from AI] 상단 - 올라간 텍스트 */}
-                  <div style={{
-                    transition: 'all 0.3s ease-out',
-                    opacity: liveSubtitleLines && liveSubtitleLines[0] ? 1 : 0,
-                    transform: liveSubtitleLines && liveSubtitleLines[0] ? 'translateY(0)' : 'translateY(10px)',
-                    minHeight: '32px'
-                  }}>
-                      <span style={{
-                        color: '#fff',
-                        fontSize: '24px',
-                        fontWeight: '600',
-                      lineHeight: '1.5',
-                        letterSpacing: '0.5px',
-                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
-                      transition: 'all 0.3s ease-out'
+                  {/* [advice from AI] 오른쪽: 3줄 자막 텍스트 (흰색 통일) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, overflow: 'hidden' }}>
+                    {liveSubtitleLines?.map((line, i) => (
+                      <div key={i} style={{
+                        transition: 'all 0.3s ease-out',
+                        opacity: line?.text ? 1 : 0,
+                        minHeight: '30px',
                       }}>
-                      {liveSubtitleLines && liveSubtitleLines[0] ? liveSubtitleLines[0] : ''}
-                      </span>
-                    </div>
-                  {/* [advice from AI] 하단 - 현재 채워지는 텍스트 */}
-                  <div style={{
-                    transition: 'all 0.3s ease-out',
-                    opacity: liveSubtitleLines && liveSubtitleLines[1] ? 1 : 0,
-                    transform: liveSubtitleLines && liveSubtitleLines[1] ? 'translateY(0)' : 'translateY(15px)',
-                    minHeight: '32px'
-                  }}>
-                    <span style={{
-                      color: '#fff',
-                      fontSize: '24px',
-                      fontWeight: '600',
-                      lineHeight: '1.5',
-                      letterSpacing: '0.5px',
-                      textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
-                      transition: 'all 0.3s ease-out'
-                    }}>
-                      {liveSubtitleLines && liveSubtitleLines[1] ? liveSubtitleLines[1] : ''}
-                    </span>
+                        <span style={{
+                          color: '#fff',
+                          fontSize: '22px',
+                          fontWeight: '600',
+                          lineHeight: '1.4',
+                          letterSpacing: '0.5px',
+                          textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}>
+                          {line?.text || ''}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ) : null}

@@ -150,6 +150,9 @@ function App() {
   
   // [advice from AI] 현재 화면에 표시할 캡션
   const [currentSpeaker, setCurrentSpeaker] = useState<string | null>(null);
+  // [advice from AI] ★ 현재 화자 번호 (자막 색상 변경용) - 0부터 시작
+  const [currentLiveSpeaker, setCurrentLiveSpeaker] = useState<number>(-1);
+  const currentLiveSpeakerRef = useRef<number>(-1);  // stale closure 방지용 ref
   const [latestSubtitleId, setLatestSubtitleId] = useState<number | null>(null);
   const displayedIdsRef = useRef<Set<number>>(new Set());  // 이미 목록에 추가된 자막 ID
   
@@ -194,7 +197,13 @@ function App() {
   // 4. 묵음 fade_timeout_ms 지속 시 페이드아웃
   // 5. ★ 후처리 결과가 바뀌면 이미 표시된 자막도 교체 가능 (실시간 업데이트)
   // =============================================================================
-  const [liveSubtitleLines, setLiveSubtitleLines] = useState<string[]>(['', '']);  // 2줄 고정 (이전확정, 최신확정) - 수집줄은 백그라운드
+  // [advice from AI] ★★★ 3줄 자막 + 화자 라벨 시스템 ★★★
+  type SubtitleLineData = { text: string; speaker: number };
+  const [liveSubtitleLines, setLiveSubtitleLines] = useState<SubtitleLineData[]>([
+    { text: '', speaker: -1 }, { text: '', speaker: -1 }, { text: '', speaker: -1 }
+  ]);
+  const line1SpeakerRef = useRef<number>(-1);  // 최상단 화자
+  const line2SpeakerRef = useRef<number>(-1);  // 중간 화자
   const lastLiveSpeakerRef = useRef<string | undefined>(undefined);
   
   
@@ -286,9 +295,10 @@ function App() {
   // - 가운데: 수집창에서 30자 차서 방금 졸업한 줄
   // - 최상단: 가장 오래된 졸업 줄
   // 동작: 수집창 30자 → 졸업 → 가운데로 이동 → 기존 가운데는 최상단으로 → 최상단은 화면에서 나감
-  const topLineRef = useRef<string>('');       // 최상단 (가장 오래된 졸업 줄)
-  const middleLineRef = useRef<string>('');    // 가운데 (방금 졸업한 줄)
-  const collectorLineRef = useRef<string>(''); // 하단 (수집창 - 실시간 변경)
+  const line1Ref = useRef<string>('');       // 최상단 (가장 오래된)
+  const line2Ref = useRef<string>('');       // 중간
+  const line3Ref = useRef<string>('');       // 최하단 (현재 채우는 중)
+  const collectorLineRef = useRef<string>(''); // 수집창 (백그라운드)
   
   // [advice from AI] ★★★ 수집창 누적 관리 ★★★
   // - WhisperLiveKit 구조: lines[]=확정 문장, buffer=인식 중인 짧은 텍스트
@@ -308,6 +318,8 @@ function App() {
   // [advice from AI] ★★★ 30자 블록 관리 ★★★
   const graduatedBlockRef = useRef<string>('');      // 상단 = 올라간 30자 블록
   const currentBlockRef = useRef<string>('');        // 하단 = 현재 채우는 중 (0~30자)
+  // [advice from AI] ★★★ 화자별 세그먼트 캡처 (졸업 시점에 저장) ★★★
+  // [advice from AI] graduatedBlockSegsRef, currentBlockSegsRef 제거 → 블록 단위 화자 색상으로 간소화
   const lastProcessedTextRef = useRef<string>('');   // 마지막으로 처리한 전체 텍스트
   const CHARS_PER_LINE = 30;     // 한 줄당 글자 수
   
@@ -353,7 +365,6 @@ function App() {
     // [advice from AI] 빈 텍스트일 때는 수집창만 비움 (졸업한 줄들은 유지!)
     if (text.length === 0) {
       collectorLineRef.current = '';
-      setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
       console.log(`[COLLECTOR] ⚠️ 빈 입력 → 수집창만 비움`);
       return;
     }
@@ -384,22 +395,20 @@ function App() {
     console.log(`[COLLECTOR] 🎓 졸업! "${graduatingText}" (${graduatingText.length}자)`);
     console.log(`[COLLECTOR] 📝 남은: "${remainingText}" (${remainingText.length}자)`);
     
-    // [advice from AI] ★★★ 졸업 처리: 가운데 → 최상단, 졸업 텍스트 → 가운데 ★★★
-    topLineRef.current = middleLineRef.current;  // 기존 가운데가 최상단으로
-    middleLineRef.current = graduatingText;      // 졸업 텍스트가 가운데로
-    collectorLineRef.current = remainingText;    // 나머지가 수집창으로
+    // [advice from AI] ★★★ 3줄 슬라이드 졸업 ★★★
+    line1Ref.current = line2Ref.current;
+    line1SpeakerRef.current = line2SpeakerRef.current;
+    line2Ref.current = line3Ref.current;
+    line2SpeakerRef.current = currentLiveSpeakerRef.current >= 0 ? currentLiveSpeakerRef.current : lastGraduatedSpeakerRef.current;
+    line3Ref.current = graduatingText;
+    collectorLineRef.current = remainingText;
     
-    // [advice from AI] ★★★ 핵심: 졸업하면 누적 텍스트 초기화! ★★★
     collectorAccumulatedRef.current = '';
-    console.log(`[COLLECTOR] 🔄 누적 초기화 + 졸업 텍스트 저장 "${graduatingText.substring(0, 20)}..."`);
-    
-    // 화면 업데이트 - 2줄만 (수집줄은 백그라운드)
-    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
-    
+    console.log(`[COLLECTOR] 🔄 3줄 슬라이드 졸업: "${graduatingText.substring(0, 20)}..."`);
     console.log(`[COLLECTOR] 🖥️ 화면:`, {
-      top: topLineRef.current ? `"${topLineRef.current.substring(0, 25)}..."` : '(empty)',
-      mid: `"${middleLineRef.current.substring(0, 25)}..."`,
-      collector: `"${remainingText}"`
+      line1: line1Ref.current ? `"${line1Ref.current.substring(0, 25)}..."` : '(empty)',
+      line2: `"${line2Ref.current.substring(0, 25)}..."`,
+      line3: `"${line3Ref.current.substring(0, 25)}..."`
     });
     
     // [advice from AI] ★ 남은 텍스트도 30자 초과면 재귀적으로 처리
@@ -534,29 +543,31 @@ function App() {
       : text;
     if (!processed) return;
     
-    // 화자 변경 시 '-' 추가
+    // [advice from AI] ★ 화자 변경 시 색상으로 구분 ('-' 텍스트 제거)
     let finalText = processed;
     if (lastGraduatedSpeakerRef.current >= 0 && 
         lineSpeaker >= 0 && 
         lineSpeaker !== lastGraduatedSpeakerRef.current) {
-      finalText = '- ' + processed;
-      console.log(`[졸업] 🔄 화자 변경: ${lastGraduatedSpeakerRef.current} → ${lineSpeaker}`);
+      console.log(`[졸업] 🔄 화자 변경: ${lastGraduatedSpeakerRef.current} → ${lineSpeaker} | 색상 변경!`);
     }
     
-    // 화자 업데이트
+    // 화자 업데이트 (0-based로 정규화)
     if (lineSpeaker >= 0) {
-      lastGraduatedSpeakerRef.current = lineSpeaker;
+      const spk0 = lineSpeaker - 1;  // 1-based → 0-based
+      lastGraduatedSpeakerRef.current = spk0;
+      currentLiveSpeakerRef.current = spk0; setCurrentLiveSpeaker(spk0);
     }
     
     console.log(`[졸업] 🎓 "${finalText.substring(0, 30)}..." (${finalText.length}자)`);
     
     // 졸업 처리: 이전 졸업줄 → 최상단, 새 졸업줄 → 가운데
-    topLineRef.current = middleLineRef.current;
-    middleLineRef.current = finalText;
-    collectorLineRef.current = '';  // 수집줄 클리어
-    
-    // 화면 업데이트
-    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
+    // [advice from AI] ★ 3줄 슬라이드
+    line1Ref.current = line2Ref.current;
+    line1SpeakerRef.current = line2SpeakerRef.current;
+    line2Ref.current = line3Ref.current;
+    line2SpeakerRef.current = currentLiveSpeakerRef.current >= 0 ? currentLiveSpeakerRef.current : lastGraduatedSpeakerRef.current;
+    line3Ref.current = finalText;
+    collectorLineRef.current = '';
     
     // [advice from AI] 자막 목록/캐시 기록 로직 제거됨
     addToRecentTexts(finalText);
@@ -573,12 +584,12 @@ function App() {
     
     console.log(`[강제졸업] 🎓 "${processed.substring(0, 30)}..." (${processed.length}자)`);
     
-    // 졸업 처리
-    topLineRef.current = middleLineRef.current;
-    middleLineRef.current = processed;
-    
-    // 화면 업데이트 (수집줄은 나중에 설정)
-    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
+    // [advice from AI] ★ 3줄 슬라이드
+    line1Ref.current = line2Ref.current;
+    line1SpeakerRef.current = line2SpeakerRef.current;
+    line2Ref.current = line3Ref.current;
+    line2SpeakerRef.current = currentLiveSpeakerRef.current >= 0 ? currentLiveSpeakerRef.current : lastGraduatedSpeakerRef.current;
+    line3Ref.current = processed;
     
     // [advice from AI] 자막 목록/캐시 기록 로직 제거됨
     addToRecentTexts(processed);
@@ -594,19 +605,28 @@ function App() {
     }
     silenceTimeoutRef.current = window.setTimeout(() => {
       console.log(`[묵음] ⏰ 4초 묵음 → 자막창 초기화`);
-      topLineRef.current = '';
-      middleLineRef.current = '';
+      line1Ref.current = '';
+      line2Ref.current = '';
+      line3Ref.current = '';
+      line1SpeakerRef.current = -1;
+      line2SpeakerRef.current = -1;
       collectorLineRef.current = '';
-      graduatedBlockRef.current = '';    // 상단 블록 초기화
+      graduatedBlockRef.current = '';
       currentBlockRef.current = '';      // 하단 블록 초기화
-      lastProcessedTextRef.current = ''; // 처리 기록 초기화
-      setLiveSubtitleLines(['', '']);
+      line1SpeakerRef.current = -1;
+      line2SpeakerRef.current = -1;
+      lastProcessedTextRef.current = '';
+      setLiveSubtitleLines([
+        { text: '', speaker: -1 }, { text: '', speaker: -1 }, { text: '', speaker: -1 }
+      ]);
     }, 4000);  // 4초 묵음 → 초기화
   }, []);
   
   const handleBufferUpdate = useCallback((buffer: BufferUpdate) => {
     const lines = buffer.lines || [];
     const bufferText = (buffer.text || '').trim();
+    
+    // [advice from AI] 화자 색상은 onSpeakerChange 콜백에서 비동기 처리됨
     
     // [advice from AI] 묵음 타이머 리셋 (텍스트가 있을 때만)
     if (bufferText || lines.length > 0) {
@@ -640,29 +660,22 @@ function App() {
     };
     
     // ========== 3. 전체 lines 텍스트 수집 ==========
-    // [advice from AI] ★★★ 화자 변경 감지: 이전 line과 직접 비교 (항상 동일한 결과 보장) ★★★
+    // [advice from AI] ★★★ 간소화: 텍스트만 수집, 화자는 블록 단위로 관리 ★★★
     let allConfirmedText = '';
-    let prevLineSpeaker = -1;  // 이전 line의 speaker (lines 배열 내에서 비교)
     
     for (const line of lines) {
       if (line && line.text?.trim() && line.speaker !== -2) {
         const processed = processLineText(line.text);
         if (processed) {
-          // [advice from AI] ★★★ 화자 변경 시 '-' 추가 (이전 line과 비교 - 항상 일관됨) ★★★
-          const speakerChanged = prevLineSpeaker >= 0 && 
-                                  line.speaker >= 0 && 
-                                  line.speaker !== prevLineSpeaker;
-          
           if (allConfirmedText) {
-            allConfirmedText += speakerChanged ? ' - ' + processed : ' ' + processed;
+            allConfirmedText += ' ' + processed;
           } else {
             allConfirmedText = processed;
           }
           
-          // 현재 line의 speaker 기록 (다음 line과 비교용)
+          // [advice from AI] ★ 마지막 유효 화자 추적 (0-based로 정규화: lines는 1-based)
           if (line.speaker >= 0) {
-            prevLineSpeaker = line.speaker;
-            lastGraduatedSpeakerRef.current = line.speaker;
+            lastGraduatedSpeakerRef.current = line.speaker - 1;  // 1-based → 0-based
           }
         }
       }
@@ -706,7 +719,17 @@ function App() {
       if (currentBlockRef.current.length >= CHARS_PER_LINE) {
         // 앞 30자 → 졸업
         const graduatingText = currentBlockRef.current.slice(0, CHARS_PER_LINE);
+        
+        // [advice from AI] ★★★ 3줄 슬라이드: line1←line2, line2←line3, line3←졸업 ★★★
+        line1Ref.current = line2Ref.current;
+        line1SpeakerRef.current = line2SpeakerRef.current;
+        line2Ref.current = line3Ref.current;
+        line2SpeakerRef.current = currentLiveSpeakerRef.current >= 0 
+          ? currentLiveSpeakerRef.current : lastGraduatedSpeakerRef.current;
+        line3Ref.current = '';  // 새로 채우기 시작
+        
         graduatedBlockRef.current = graduatingText;
+        
         // 나머지 → 다음 블록
         currentBlockRef.current = currentBlockRef.current.slice(CHARS_PER_LINE);
         
@@ -746,16 +769,7 @@ function App() {
     
     lastProcessedTextRef.current = allConfirmedText;
     
-    const topLine = graduatedBlockRef.current;
-    const bottomLine = currentBlockRef.current;
-    
-    // 변경 감지
-    if (topLine !== topLineRef.current || bottomLine !== middleLineRef.current) {
-      console.log(`[졸업] 📝 상단: "${topLine}" (${topLine.length}자) | 하단: "${bottomLine}" (${bottomLine.length}자)`);
-    }
-    
-    topLineRef.current = topLine;
-    middleLineRef.current = bottomLine;
+    // [advice from AI] 변경 감지 로그 (디버그용)
     
     // ========== 3. 새 lines가 자막 목록에 추가 ==========
     // 마지막 lines가 새로 추가됐으면 자막 목록에도 추가
@@ -764,7 +778,7 @@ function App() {
       const newLine = lines[newIdx];
       
       if (newLine && newLine.text?.trim() && newLine.speaker !== -2) {
-        const finalText = processLineText(newLine.text, newLine.speaker);
+        const finalText = processLineText(newLine.text);
         
         if (finalText) {
           // 자막 목록에 추가
@@ -808,8 +822,18 @@ function App() {
     
     collectorLineRef.current = collector;
     
-    // ========== 5. 화면 업데이트 (2줄만 표시 - 수집줄은 백그라운드) ==========
-    setLiveSubtitleLines([topLineRef.current, middleLineRef.current]);
+    // ========== 5. 화면 업데이트 (3줄 + 화자 라벨) ==========
+    // [advice from AI] ★★★ 3줄: line1(최상단), line2(중간), line3(현재 채우는 중) ★★★
+    // line3 = currentBlock (아직 졸업 안 한 현재 텍스트)
+    line3Ref.current = currentBlockRef.current;
+    const curSpk = currentLiveSpeakerRef.current >= 0 
+      ? currentLiveSpeakerRef.current : lastGraduatedSpeakerRef.current;
+    
+    setLiveSubtitleLines([
+      { text: line1Ref.current, speaker: line1SpeakerRef.current },
+      { text: line2Ref.current, speaker: line2SpeakerRef.current },
+      { text: line3Ref.current, speaker: curSpk },
+    ]);
     
     // 이전 lines 저장
     lastLinesRef.current = lines.map(l => ({...l}));
@@ -825,6 +849,8 @@ function App() {
     getVideoElement: () => videoPlayerRef.current?.getVideoElement() || null,
     onSubtitle: handleVideoAudioSubtitle,
     onBufferUpdate: handleBufferUpdate,
+    // [advice from AI] ★ 화자 변경 즉시 색상 반영 (자막과 비동기)
+    onSpeakerChange: (speaker: number) => { currentLiveSpeakerRef.current = speaker; setCurrentLiveSpeaker(speaker); },
     onStatusChange: (status) => {
       console.log(`[VIDEO-STT] 상태: ${status}`);
       if (status === 'capturing') {
@@ -852,13 +878,18 @@ function App() {
     currentSentenceRef.current = '';
     displayTextRef.current = '';
     lastCompletedTextRef.current = '';
-    setLiveSubtitleLines(['', '']);
+    setLiveSubtitleLines([
+      { text: '', speaker: -1 }, { text: '', speaker: -1 }, { text: '', speaker: -1 }
+    ]);
     
     // [advice from AI] 자막 규칙 ref 초기화 (3줄)
-    topLineRef.current = '';
-    middleLineRef.current = '';
-    collectorLineRef.current = '';  // 수집창
-    collectorAccumulatedRef.current = '';  // 누적 텍스트
+    line1Ref.current = '';
+    line2Ref.current = '';
+    line3Ref.current = '';
+    line1SpeakerRef.current = -1;
+    line2SpeakerRef.current = -1;
+    collectorLineRef.current = '';
+    collectorAccumulatedRef.current = '';
     
     // [advice from AI] 30자 블록 JSON 시간 ref 초기화
     blockJsonStartRef.current = 0;
@@ -866,6 +897,8 @@ function App() {
     blockStartedRef.current = false;
     graduatedBlockRef.current = '';
     currentBlockRef.current = '';
+    line1SpeakerRef.current = -1;
+    line2SpeakerRef.current = -1;
     lastProcessedTextRef.current = '';
     lastLinesRef.current = [];
     addedToListIndexRef.current = -1;
@@ -1186,10 +1219,15 @@ function App() {
       // ★ WhisperLiveKit 모드: 재생 시 실시간 WebSocket 캡처
       console.log('[APP] ▶️ 재생 시작 → WhisperLiveKit 실시간 STT 캡처!');
       // [advice from AI] ★ 첫 캡처 시작 시에만 초기화 (일시정지 후 재개는 유지!)
-      setLiveSubtitleLines(['', '']);
-      topLineRef.current = '';
-      middleLineRef.current = '';
-      collectorLineRef.current = '';  // 수집창
+      setLiveSubtitleLines([
+        { text: '', speaker: -1 }, { text: '', speaker: -1 }, { text: '', speaker: -1 }
+      ]);
+      line1Ref.current = '';
+      line2Ref.current = '';
+      line3Ref.current = '';
+      line1SpeakerRef.current = -1;
+      line2SpeakerRef.current = -1;
+      collectorLineRef.current = '';
       collectorAccumulatedRef.current = '';  // 누적 텍스트
       displayTextRef.current = '';
       lastCompletedTextRef.current = '';
@@ -1739,6 +1777,7 @@ function App() {
               currentSpeaker={currentSpeaker}
               subtitleLines={subtitleLines}
               liveSubtitleLines={isCapturing ? liveSubtitleLines : undefined}
+              currentLiveSpeaker={isCapturing ? currentLiveSpeaker : -1}
               onTimeUpdate={handleTimeUpdate}
               onDurationChange={handleDurationChange}
               onPlay={handlePlay}

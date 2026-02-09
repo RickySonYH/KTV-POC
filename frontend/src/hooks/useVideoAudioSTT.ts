@@ -28,12 +28,16 @@ export interface BufferUpdate {
   linesCount?: number;
   // [advice from AI] ★ 확정 인덱스 기반 졸업을 위해 lines 전체 전달
   lines?: LineItem[];
+  // [advice from AI] ★ 최신 화자분리 결과 (서버에서 직접 전달)
+  latestDiarSpeaker?: number;
 }
 
 interface UseVideoAudioSTTProps {
   getVideoElement: () => HTMLVideoElement | null;  // [advice from AI] 함수로 받아서 유연하게
   onSubtitle: (subtitle: VideoAudioSubtitle) => void;
   onBufferUpdate?: (buffer: BufferUpdate) => void;
+  // [advice from AI] ★ 화자 변경 즉시 콜백 (자막과 비동기 처리)
+  onSpeakerChange?: (speaker: number) => void;
   onStatusChange?: (status: 'idle' | 'connecting' | 'capturing' | 'error') => void;
   wsUrl?: string;
 }
@@ -47,6 +51,17 @@ const getWsUrl = () => {
     return 'ws://localhost:6470/asr';
   }
   return `ws://${window.location.hostname}:6470/asr`;
+};
+
+// [advice from AI] ★ pyannote 화자분리 전용 WebSocket URL
+const getDiarizeWsUrl = () => {
+  if (window.location.protocol === 'https:') {
+    return `wss://${window.location.host}/diarize`;
+  }
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'ws://localhost:6471/diarize';
+  }
+  return `ws://${window.location.hostname}:6471/diarize`;
 };
 
 // [advice from AI] WhisperLiveKit 시간 문자열 파싱 ("0:00:05" → 5.0)
@@ -68,11 +83,12 @@ const parseTimeString = (timeStr: string | number | undefined): number | null =>
   return null;
 };
 
-export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, onStatusChange, wsUrl }: UseVideoAudioSTTProps) {
+export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, onSpeakerChange, onStatusChange, wsUrl }: UseVideoAudioSTTProps) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'capturing' | 'error'>('idle');
   
   const wsRef = useRef<WebSocket | null>(null);
+  const diarWsRef = useRef<WebSocket | null>(null);  // [advice from AI] ★ pyannote 화자분리 WebSocket
   const audioContextRef = useRef<AudioContext | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);  // [advice from AI] 현재 비디오 요소 저장
   // [advice from AI] 유니크 ID 생성 - timestamp 기반 + 큰 오프셋으로 App.tsx와 충돌 방지
@@ -198,6 +214,28 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
       ws.onopen = async () => {
         console.log('[VIDEO-STT] ✅ WebSocket 연결 성공');
         
+        // [advice from AI] ★★★ pyannote 화자분리 WebSocket 연결 ★★★
+        try {
+          const diarUrl = getDiarizeWsUrl();
+          console.log('[DIAR-WS] 🔌 pyannote 연결:', diarUrl);
+          const diarWs = new WebSocket(diarUrl);
+          diarWsRef.current = diarWs;
+          diarWs.onopen = () => console.log('[DIAR-WS] ✅ pyannote 연결 성공');
+          diarWs.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type === 'speaker_change' && data.speaker !== undefined && onSpeakerChange) {
+                console.log(`[DIAR-WS] 🎨 pyannote 화자 변경! → 화자${data.speaker}`);
+                onSpeakerChange(data.speaker);  // pyannote는 0-based
+              }
+            } catch (e) { /* ignore */ }
+          };
+          diarWs.onerror = (e) => console.warn('[DIAR-WS] ⚠️ pyannote 오류:', e);
+          diarWs.onclose = () => console.log('[DIAR-WS] 🔌 pyannote 연결 종료');
+        } catch (e) {
+          console.warn('[DIAR-WS] ⚠️ pyannote 연결 실패 (STT는 계속 동작):', e);
+        }
+        
         // [advice from AI] AudioContext 생성 - 비디오의 오디오를 처리
         const audioContext = new AudioContext();
         audioContextRef.current = audioContext;
@@ -315,6 +353,10 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           }
           
           ws.send(pcmData.buffer);
+          // [advice from AI] ★ pyannote에도 동시 전송 (화자분리용)
+          if (diarWsRef.current?.readyState === WebSocket.OPEN) {
+            diarWsRef.current.send(pcmData.buffer);
+          }
         };
         
         // [advice from AI] ★ 오디오 체인 연결: source → lowpass1 → lowpass2 → compressor → processor
@@ -406,6 +448,18 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
           lastMessageTimeRef.current = Date.now();
           reconnectAttemptsRef.current = 0;  // 성공적으로 메시지 받으면 재시도 카운트 리셋
           
+          // [advice from AI] ★★★ 화자 변경 전용 이벤트 (자막과 완전 분리) ★★★
+          if (data.type === 'speaker_change' && onSpeakerChange) {
+            console.log(`[DIAR-COLOR] 🎨 화자 변경 이벤트! → 화자${data.latest_speaker}`);
+            onSpeakerChange(data.latest_speaker);
+            return;  // 화자 이벤트는 여기서 끝 (자막 처리 안 함)
+          }
+
+          // [advice from AI] 자막 데이터에 포함된 최신 화자도 반영
+          if (data.latest_speaker !== undefined && data.latest_speaker >= 0 && onSpeakerChange) {
+            onSpeakerChange(data.latest_speaker);
+          }
+
           // [advice from AI] 설정/종료 메시지는 무시
           if (data.type === 'config' || data.type === 'ready_to_stop') {
             return;
@@ -462,6 +516,10 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
               ? `화자${line.speaker + 1}` 
               : undefined;
             lastSpeakerRef.current = line.speaker;
+            // [advice from AI] ★ 새 line의 화자 즉시 색상 반영 (0-based: lines는 1-based)
+            if (line.speaker >= 0 && onSpeakerChange) {
+              onSpeakerChange(line.speaker - 1);  // 1-based → 0-based
+            }
             console.log(`[STT] 🎤 화자: ${speaker || '없음'} (raw: ${line.speaker})`);
             
             const captureStartVideoTime = captureStartVideoTimeRef.current;
@@ -510,7 +568,9 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
               speaker: speakerStr,
               isNoAudio: data.status === 'no_audio_detected',
               linesCount: lines.length,
-              lines: lines  // ★ 핵심: lines 전체 전달
+              lines: lines,  // ★ 핵심: lines 전체 전달
+              // [advice from AI] ★ 서버 화자분리 결과 직접 전달 (실시간 색상용)
+              latestDiarSpeaker: data.latest_speaker !== undefined ? data.latest_speaker : undefined
             });
           }
 
@@ -567,6 +627,12 @@ export function useVideoAudioSTT({ getVideoElement, onSubtitle, onBufferUpdate, 
       wsRef.current.close();
     }
     wsRef.current = null;
+    
+    // [advice from AI] ★ pyannote WebSocket 정리
+    if (diarWsRef.current) {
+      try { diarWsRef.current.close(); } catch (_e) { /* ignore */ }
+      diarWsRef.current = null;
+    }
 
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close();

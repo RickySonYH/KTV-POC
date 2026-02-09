@@ -1,0 +1,47 @@
+# WhisperLiveKit 실시간 STT 서버 (KTV 튜닝 모델 + NeMo 화자분리)
+# 설치 방법: README.md 참고
+
+services:
+  whisper-livekit:
+    # Harbor 레지스트리에서 이미지 Pull (권장)
+    image: harbor.timbel.dev/etc/whisper-livekit-nemo:v1
+    
+    # 대안 1: tar 파일에서 로드
+    # docker load -i whisper-livekit-nemo.tar
+    # image: ktv-poc-whisper-livekit:nemo
+    
+    container_name: ktv-whisper-livekit
+    ports:
+      - "6470:8000"
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    volumes:
+      - ./hf_cache:/root/.cache/huggingface/hub
+      - ./models:/app/models:ro
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    command: [
+      "--model", "/app/models",
+      "--language", "ko",
+      "--pcm-input",
+      "--backend-policy", "localagreement",
+      "--diarization",
+      "--init-prompt", "국무회의, 국민의례, 경례, 대통령, 국무총리, 장관, 정책, 예산, 법안, 의결"
+    ]
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

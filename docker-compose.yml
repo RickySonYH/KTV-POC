@@ -48,6 +48,7 @@ services:
     # [advice from AI] --diarization: 화자분리 활성화 (speaker 정보 제공)
     # [advice from AI] Dockerfile ENTRYPOINT가 "whisperlivekit-server --host 0.0.0.0"이므로 command는 추가 인수만 전달
     # [advice from AI] 화자분리(diarization) 활성화 - NeMo Sortformer 사용
+    # [advice from AI] 화자분리(diarization) 활성화 - punctuation-split 제거 (구두점 단위 쪼개기 비활성)
     command: ["--model", "/app/models", "--language", "ko", "--pcm-input", "--backend-policy", "localagreement", "--diarization", "--init-prompt", "국무회의, 국민의례, 경례, 대통령, 국무총리, 장관, 정책, 예산, 법안, 의결"]
     restart: unless-stopped
     healthcheck:
@@ -116,6 +117,34 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  # [advice from AI] ★ pyannote.audio 실시간 화자분리 전용 서비스
+  pyannote-diarization:
+    build:
+      context: ./pyannote-diarization
+      dockerfile: Dockerfile
+    container_name: ktv-pyannote-diarization
+    ports:
+      - "6471:8001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /home/rickyson/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ./pyannote-diarization/server.py:/app/server.py
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   ktv-uploads:

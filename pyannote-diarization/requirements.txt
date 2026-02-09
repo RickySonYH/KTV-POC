@@ -1,0 +1,9 @@
+# [advice from AI] pyannote 실시간 화자분리 의존성
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+websockets>=12.0
+numpy>=1.24.0,<2.0.0
+huggingface_hub>=0.20.0,<1.0.0
+pyannote.audio==3.3.2
+soundfile>=0.12.1
+rich>=13.0.0
